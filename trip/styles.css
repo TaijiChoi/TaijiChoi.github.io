@@ -577,6 +577,15 @@ label.btn{cursor:pointer}
   font-size:11.5px;color:var(--sub);font-weight:650;padding:20px;line-height:1.5;z-index:2;
   background:rgba(244,247,252,.94)}
 .map-note{font-size:10.5px;color:var(--sub-2);margin:5px 2px 8px;font-weight:600}
+/* v17: 지도 종류 전환 · 구글지도로 전체 동선 */
+.map-src{display:flex;align-items:center;gap:4px;margin:0 0 6px}
+.map-src .ms-btn{height:26px;padding:0 11px;border-radius:8px;border:1px solid #E2E9F3;background:#F7FAFF;
+  color:var(--sub);font-size:11px;font-weight:750;line-height:1;transition:background .15s,color .15s}
+.map-src .ms-btn.active{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 2px 8px rgba(54,143,255,.25)}
+.map-src .ms-hint{margin-left:auto;font-size:10.5px;color:var(--sub-2);font-weight:650}
+.map-all{margin:0 12px 10px;width:calc(100% - 24px);height:38px;font-size:13px;gap:6px;
+  border:1px solid #D8E6FB;background:var(--blue-l);color:var(--blue-d)}
+.map-all svg{color:var(--blue-d)}
 .rt-icon{background:none;border:0}
 .rt-icon span{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;
   background:linear-gradient(135deg,var(--blue),#2F7BEE);color:#fff;font-size:12.5px;font-weight:800;

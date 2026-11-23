@@ -6,9 +6,29 @@
   var App = (TL.App = {});
   var A = TL.Actions;
 
-  App.view = { screen: 'home', tripId: null, tab: 'schedule', day: '', mDay: 'all', mCat: 'all', mapOpen: null };
+  App.view = { screen: 'home', tripId: null, tab: 'schedule', day: '', mDay: 'all', mCat: 'all', mapOpen: null, mapSource: 'google' };
   var scrollMap = {};
   var booted = false;
+
+  /* 동선 지도 종류: 기기에 마지막으로 고른 값 (없으면 구글지도) */
+  function readMapSource() {
+    try {
+      var v = root.localStorage && root.localStorage.getItem('triplog.mapSource');
+      if (v && TL.Core.MAP_SOURCES[v]) return v;
+    } catch (e) {}
+    return 'google';
+  }
+
+  /** 지도 종류 바꾸기 — 타일이 안 떠서 OSM으로 넘어갈 때도 여기로 온다 */
+  App.setMapSource = function (key, opts) {
+    var k = TL.Core.mapSource(key).key;
+    App.view.mapSource = k;
+    try { root.localStorage.setItem('triplog.mapSource', k); } catch (e) {}
+    if (App.view.tab === 'schedule') App.view.mapOpen = true;
+    render();
+    if (opts && opts.message) UI.toast(opts.message, 3200);
+    else if (!opts || !opts.silent) UI.toast(k === 'google' ? '구글지도로 바꿨어요' : 'OpenStreetMap으로 바꿨어요', 1600);
+  };
 
   App.currentTrip = function () {
     return App.view.tripId ? Store.trip(App.view.tripId) : null;
@@ -135,7 +155,7 @@
     if (TL.RouteMap) {
       if (v.screen === 'trip' && trip && v.tab === 'schedule') {
         var dayKey = v.day || Screens.defaultDay(trip);
-        requestAnimationFrame(function () { TL.RouteMap.paint(trip, dayKey); });
+        requestAnimationFrame(function () { TL.RouteMap.paint(trip, dayKey, v.mapSource); });
       } else {
         TL.RouteMap.hide();
       }
@@ -175,6 +195,10 @@
     if (act === 'toggle-map') {
       App.view.mapOpen = el.getAttribute('aria-expanded') !== 'true';
       render();
+      return;
+    }
+    if (act === 'map-source') {
+      App.setMapSource(el.getAttribute('data-src'));
       return;
     }
     if (act === 'filter-day') { App.view.mDay = el.getAttribute('data-day'); render(); return; }
@@ -360,6 +384,7 @@
   /* --------------------------------------------------------------- boot */
   function boot() {
     booted = true;
+    App.view.mapSource = readMapSource();
     Store.setOnline(navigator.onLine !== false);
     var code = Store.bootRemoteFromURL(location.search);
     var initial = parse();

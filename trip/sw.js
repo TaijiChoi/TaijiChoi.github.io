@@ -1,7 +1,7 @@
 /* 트립로그 서비스 워커
    · 앱 셸(HTML·JS·CSS·아이콘)을 캐시해 오프라인에서도 앱이 열린다
    · index.html의 ?v= 값과 아래 VERSION을 함께 올린다 (deploy 전 확인: tests/run.py) */
-var VERSION = '16';
+var VERSION = '17';
 var CACHE = 'triplog-v' + VERSION;
 var ASSETS = [
   './',

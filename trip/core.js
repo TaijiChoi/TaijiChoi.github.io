@@ -538,6 +538,50 @@
     };
   };
 
+  /* ------------------------------------------------- 지도 타일 소스 (v17) */
+  /** 동선 지도에 쓸 타일 소스. 알 수 없는 값은 구글지도로 본다. */
+  Core.MAP_SOURCES = {
+    google: {
+      key: 'google', label: '구글지도', note: 'Google 지도',
+      url: 'https://mt{s}.google.com/vt/lyrs=m&hl=ko&x={x}&y={y}&z={z}',
+      subdomains: ['0', '1', '2', '3'], maxZoom: 19, attribution: '&copy; Google'
+    },
+    osm: {
+      key: 'osm', label: 'OSM', note: 'OpenStreetMap',
+      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      subdomains: [], maxZoom: 19, attribution: '&copy; OpenStreetMap'
+    }
+  };
+  Core.mapSourceKeys = ['google', 'osm'];
+  Core.mapSource = function (key) {
+    var k = String(key == null ? '' : key).toLowerCase();
+    return Object.prototype.hasOwnProperty.call(Core.MAP_SOURCES, k) ? Core.MAP_SOURCES[k] : Core.MAP_SOURCES.google;
+  };
+  /** 타일 URL 템플릿에 값을 채운 실제 주소 (디버그·테스트용) */
+  Core.tileUrl = function (key, z, x, y, s) {
+    var src = Core.mapSource(key);
+    return src.url.replace('{s}', String(s == null ? 0 : s)).replace('{z}', String(z))
+      .replace('{x}', String(x)).replace('{y}', String(y));
+  };
+  /** 좌표 있는 일정을 순서대로 이은 구글 지도 길찾기 URL (1곳이면 장소 검색) */
+  Core.routeMapUrl = function (items) {
+    var pts = (items || []).filter(Core.hasGeo).map(function (it) {
+      return Number(it.lat) + ',' + Number(it.lng);
+    });
+    if (!pts.length) return '';
+    if (pts.length === 1) return 'https://www.google.com/maps/search/?api=1&query=' + pts[0];
+    var MAX = 10;                       // 구글 지도는 출발·도착 포함 10곳까지 한 번에
+    if (pts.length > MAX) pts = pts.slice(0, MAX);
+    var url = 'https://www.google.com/maps/dir/?api=1&origin=' + pts[0] +
+      '&destination=' + pts[pts.length - 1];
+    var mid = pts.slice(1, -1);
+    if (mid.length) url += '&waypoints=' + mid.join('%7C');
+    return url;
+  };
+  Core.routeMapLabel = function (count) {
+    return Number(count) > 1 ? '구글지도로 전체 동선 보기' : '구글지도에서 장소 보기';
+  };
+
   /* --------------------------------------------------------- overlap */
   Core.timeMin = function (t) {
     var m = /^(\d{1,2}):(\d{2})$/.exec(String(t == null ? '' : t).trim());

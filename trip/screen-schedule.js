@@ -67,6 +67,16 @@
   };
 
   /* --------------------------------------------------------- 동선 지도 */
+  /** 동선 지도에 지금 쓰는 타일 소스: 화면 상태 → 기기에 저장한 값 → 구글지도 */
+  S.mapSourceOf = function (view) {
+    if (view && view.mapSource) return Core.mapSource(view.mapSource);
+    try {
+      var saved = root.localStorage && root.localStorage.getItem('triplog.mapSource');
+      if (saved) return Core.mapSource(saved);
+    } catch (e) {}
+    return Core.mapSource('google');
+  };
+
   S.routePanel = function (trip, day, items, view) {
     var geo = items.filter(Core.hasGeo);
     if (!geo.length) {
@@ -85,13 +95,29 @@
         (segs.length ? ' · 구간 ' + segs.length + '개 · 총 ' + Core.kmLabel(segs.reduce(function (a, s) { return a + s.km; }, 0)) : ' · 핀만 표시') + '</small></span>' +
       '<span class="chev' + (open ? ' open' : '') + '">' + UI.icon('down', 16) + '</span>' +
     '</button>';
+    var src = S.mapSourceOf(view);
+    var routeUrl = Core.routeMapUrl(geo);
     if (open) {
-      html += '<div class="map-wrap"><div id="route-map" class="route-map" role="img" aria-label="' + UI.esc(Core.dayLabel(trip, day)) + ' 동선 지도">' +
+      html += '<div class="map-wrap"><div class="map-src" role="group" aria-label="지도 종류">' +
+        Core.mapSourceKeys.map(function (k) {
+          var o = Core.mapSource(k);
+          var on = o.key === src.key;
+          return '<button type="button" class="ms-btn' + (on ? ' active' : '') + '" data-action="map-source" data-src="' + o.key + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + o.label + '</button>';
+        }).join('') +
+        '<span class="ms-hint">지도 종류</span></div>' +
+        '<div id="route-map" class="route-map" role="img" aria-label="' + UI.esc(Core.dayLabel(trip, day)) + ' 동선 지도">' +
         '<div class="map-offline" style="display:none">지도를 불러오지 못했어요</div></div>' +
-        '<div class="map-note">OpenStreetMap · 오프라인에서는 지도 그림 없이 아래 구간 정보만 보여요</div></div>';
+        '<div class="map-note">' + (src.key === 'google'
+          ? 'Google 지도 · 타일이 안 보이면 OSM으로 바꿔 보세요 · 오프라인에서는 지도 그림 없이 아래 구간 정보만 보여요'
+          : 'OpenStreetMap · 오프라인에서는 지도 그림 없이 아래 구간 정보만 보여요') + '</div></div>';
       html += '<div class="route-pins">' + geo.map(function (it, i) {
         return '<span class="rp"><b>' + (i + 1) + '</b>' + UI.esc(it.title) + '</span>';
       }).join('') + '</div>';
+      if (routeUrl) {
+        html += '<a class="btn btn-soft map-all" href="' + UI.esc(routeUrl) + '" target="_blank" rel="noopener"' +
+          (geo.length > 1 ? ' title="' + UI.esc(geo.slice(0, 10).map(function (it) { return it.title; }).join(' → ')) + '"' : '') + '>' +
+          UI.icon('map', 17) + Core.routeMapLabel(geo.length) + '</a>';
+      }
       if (segs.length) {
         html += '<div class="seg-list">' + segs.map(function (s, i) { return S.segRow(s, i); }).join('') + '</div>';
       } else {
