@@ -47,7 +47,7 @@
     if (!trip) return;
     App.view.screen = 'trip';
     App.view.tripId = id;
-    App.view.tab = tab || App.view.tab || 'schedule';
+    App.view.tab = tab || 'schedule';
     App.view.day = '';
     Store.setCurrent(id);
     setHash();
