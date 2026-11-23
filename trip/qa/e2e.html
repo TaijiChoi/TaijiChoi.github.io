@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>트립로그 QA — 390x844</title>
+<style>
+  html,body{margin:0;background:#0F172A;color:#E5EDFB;font-family:-apple-system,"Malgun Gothic",sans-serif}
+  #wrap{display:flex;gap:16px;align-items:flex-start;padding:12px}
+  iframe{width:390px;height:844px;border:0;border-radius:14px;background:#fff;flex:none}
+  #out{margin:0;padding:12px;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;max-width:640px}
+  .p{color:#5BE49B}.f{color:#FF8A8A}.h{color:#93C5FD}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <iframe id="app" src="../index.html?qa=1" title="트립로그 390x844"></iframe>
+  <pre id="out">running…</pre>
+</div>
+<iframe id="invite" style="position:absolute;left:-2000px;top:0" title="invite"></iframe>
+<script>
+(function () {
+  'use strict';
+  var out = document.getElementById('out');
+  var lines = [], pass = 0, fails = [];
+  var f = document.getElementById('app');
+  var errs = [];
+
+  function log(kind, msg, extra) {
+    var tag = kind === 'PASS' ? 'PASS' : kind === 'FAIL' ? 'FAIL' : '--';
+    lines.push(tag + ' ' + msg + (extra != null && extra !== '' ? '  [' + extra + ']' : ''));
+    out.textContent = lines.join('\n');
+  }
+  function ok(cond, msg, extra) {
+    if (cond) { pass++; log('PASS', msg); }
+    else { fails.push(msg + (extra != null ? ' :: ' + extra : '')); log('FAIL', msg, extra); }
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  var wins = 0, doc = null;
+  function q(sel) { return doc.querySelector(sel); }
+  function qa(sel) { return Array.prototype.slice.call(doc.querySelectorAll(sel)); }
+  async function click(el, wait) {
+    if (!el) throw new Error('click target missing');
+    el.click();
+    await sleep(wait == null ? 45 : wait);
+  }
+  async function clickSel(sel) { await click(q(sel)); }
+  function setv(sel, v) {
+    var el = q(sel);
+    if (!el) throw new Error('no field ' + sel);
+    el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function text(sel) { var el = q(sel); return el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : ''; }
+  function rect(sel) { var el = q(sel); return el ? el.getBoundingClientRect() : null; }
+  function noOverflow(label) {
+    var sw = doc.documentElement.scrollWidth, iw = wins;
+    ok(sw <= iw + 1, '가로 스크롤 없음 · ' + label, sw + ' / ' + iw);
+  }
+  function hitTest(sel, label) {
+    var el = q(sel);
+    if (!el) { ok(false, '요소 있음 · ' + label); return; }
+    el.scrollIntoView({ block: 'center' });
+    var r = el.getBoundingClientRect();
+    var hit = doc.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    ok(!!hit && (hit === el || el.contains(hit)), '가려지지 않고 누를 수 있음 · ' + label, hit ? (hit.className || hit.tagName) : 'none');
+  }
+  function ready() {
+    try {
+      var w = f.contentWindow;
+      return !!(w && w.TL && w.TL.App && w.document && w.document.getElementById('screen'));
+    } catch (e) { return false; }
+  }
+  async function waitReady(timeout) {
+    var t0 = Date.now();
+    while (Date.now() - t0 < (timeout || 8000)) {
+      if (ready()) return true;
+      await sleep(60);
+    }
+    return false;
+  }
+  async function pickDate(iso) {
+    for (var i = 0; i < 14; i++) {
+      var cell = q('.cal-day[data-date="' + iso + '"]');
+      if (cell) { await click(cell, 60); return true; }
+      var next = q('[data-action="cal-next"]');
+      if (!next) return false;
+      await click(next, 60);
+    }
+    return false;
+  }
+  function memberCount() { return qa('#member-list .mchip').length; }
+
+  window.__QA = { pass: 0, fails: [], lines: lines, done: false };
+
+  async function run() {
+    log('HEAD', '트립로그 모바일 390x844 통합 테스트 시작');
+    var w = f.contentWindow;
+
+    // 부트 오류 수집 (앱이 그려진 뒤부터)
+    w.addEventListener('error', function (e) { errs.push('error: ' + (e.message || e.type)); });
+    w.addEventListener('unhandledrejection', function (e) { errs.push('rejection: ' + (e.reason && e.reason.message || e.reason)); });
+    var cerr = w.console.error;
+    w.console.error = function () { errs.push('console.error: ' + Array.prototype.join.call(arguments, ' ')); cerr.apply(w.console, arguments); };
+
+    doc = f.contentDocument;
+    var today = new Date();
+    log('INFO', 'viewport ' + w.innerWidth + 'x' + w.innerHeight + ' / tz ' + (w.Intl.DateTimeFormat().resolvedOptions().timeZone));
+
+    // 초기 상태: 이 브라우저 프로필의 이 사이트 테스트 데이터만 비운다
+    w.localStorage.clear();
+    w.location.reload();
+    await sleep(400);
+    for (var i = 0; i < 60 && !ready(); i++) await sleep(80);
+    w = f.contentWindow; doc = f.contentDocument;
+    w.addEventListener('error', function (e) { errs.push('error: ' + (e.message || e.type)); });
+    ok(ready(), '앱이 390x844에서 부팅');
+    if (!ready()) return finish();
+    w.confirm = function () { return true; };   // 확인 대화상자는 통과
+
+    var S = w.TL.Store;
+    ok(S.trips().length >= 1, '첫 실행 예시 여행 자동 로드', S.trips().length);
+
+    /* ---------------------------------------------------- 1) 새 여행 + 달력 */
+    await clickSel('[data-action="new-trip"]');
+    noOverflow('새 여행 시트');
+    ok(qa('input[type="date"]').length === 0, '네이티브 date 입력 없음');
+    ok(!!q('.range-btn') && !!q('#cal-wrap'), '기간 버튼·달력 컨테이너');
+    ok(q('#cal-wrap').className.indexOf('hide') >= 0, '달력은 처음엔 접힘');
+    var sh = rect('.sheet');
+    ok(sh && sh.width <= 390 + 1, '시트 폭이 화면 안', sh && Math.round(sh.width));
+    ok(sh && Math.abs(sh.bottom - 844) <= 2, '시트가 화면 아래에 붙음', sh && Math.round(sh.bottom));
+
+    await clickSel('[data-action="cal-toggle"]');
+    ok(!!q('.cal-grid'), '한 번 눌러 달력 펼침');
+    var cr = rect('.cal');
+    ok(cr && cr.height > 240 && cr.width <= 358, '달력 크기 정상', cr && Math.round(cr.width) + 'x' + Math.round(cr.height));
+    ok(qa('.cal-day').length === 42, '42칸 달력', qa('.cal-day').length);
+    noOverflow('달력 펼친 시트');
+
+    await pickDate('2026-12-05');
+    ok(text('#range-label').indexOf('12.5') >= 0, '시작일 12.5 선택', text('#range-label'));
+    ok(text('#range-sub').indexOf('종료일') >= 0, '종료일 안내');
+    await pickDate('2026-12-08');
+    ok(text('#range-label').indexOf('12.8') >= 0 && text('#range-sub').indexOf('3박 4일') >= 0, '기간 12.5~12.8 · 3박 4일', text('#range-label') + ' / ' + text('#range-sub'));
+    ok(q('#cal-wrap').className.indexOf('hide') >= 0, '기간을 다 고르면 달력 접힘');
+    ok(q('#f_start').value === '2026-12-05' && q('#f_end').value === '2026-12-08', '숨은 값 동기화');
+
+    setv('#f_name', '모바일 테스트 여행');
+    setv('#f_dest', '부산');
+    setv('#member-new', '아내');
+    await clickSel('[data-action="add-member-chip"]');
+    setv('#member-new', '아들');
+    await clickSel('[data-action="add-member-chip"]');
+    setv('#member-new', '동생');
+    await clickSel('[data-action="add-member-chip"]');
+    ok(memberCount() === 4, '일행 칩 4개', memberCount());
+    ok(qa('#member-list .chip-x').length === 4, '칩마다 삭제 버튼');
+    var before = memberCount();
+    await click(qa('#member-list .chip-x')[3]);
+    ok(memberCount() === before - 1, '칩 삭제로 1명 빠짐', memberCount());
+    setv('#member-new', '아내');
+    await clickSel('[data-action="add-member-chip"]');
+    ok(memberCount() === before - 1, '중복 이름은 추가 안 됨', memberCount());
+
+    await clickSel('[data-action="save-new-trip"]');
+    ok(/\/t\//.test(w.location.hash), '여행 화면으로 이동', w.location.hash);
+    var trip = S.trips().filter(function (t) { return t.name === '모바일 테스트 여행'; })[0];
+    ok(!!trip, '여행 저장됨');
+    ok(trip && trip.startDate === '2026-12-05' && trip.endDate === '2026-12-08', '저장된 기간', trip && trip.startDate + '~' + trip.endDate);
+    ok(trip && trip.members.length === 3, '저장된 일행 3명', trip && trip.members.length);
+    ok(qa('.chips .chip').length === 5, 'Day 탭 5개(사전준비+4)', qa('.chips .chip').length);
+    ok(!!q('.people-bar') && !!q('[data-action="manage-members"]'), '상단 일행 줄·관리 버튼');
+    noOverflow('일정 탭');
+
+    /* ------------------------------------------------------- 2) 일행 관리 */
+    await clickSel('[data-action="manage-members"]');
+    ok(!!q('.mem-rows') && qa('.mrow').length === 3, '일행 관리 목록 3명', qa('.mrow').length);
+    setv('#mem-new', '친구');
+    await clickSel('[data-action="mem-add"]');
+    ok(qa('.mrow').length === 4, '일행 추가', qa('.mrow').length);
+    await click(qa('[data-action="mem-edit"]')[3]);
+    ok(!!q('#mem-edit-input'), '이름 수정 입력 열림');
+    setv('#mem-edit-input', '친구2');
+    await click(qa('[data-action="mem-save"]')[0]);
+    ok(S.trips().filter(function (t) { return t.id === trip.id; })[0].members.some(function (m) { return m.name === '친구2'; }), '이름 수정 저장');
+    await click(qa('[data-action="mem-set-me"]')[3]);
+    ok(S.meId(S.trip(trip.id), null) === S.trip(trip.id).members[3].id, '내 이름 지정');
+    await click(qa('[data-action="mem-del"]')[3]);
+    ok(qa('.mrow').length === 3, '일행 삭제', qa('.mrow').length);
+    await clickSel('[data-action="close-modal"]');
+    ok(!q('.modal'), '시트 닫힘');
+
+    /* ------------------------------------------------- 3) 일정 추가·이동·수정 */
+    await click(q('.chip[data-day="d2"]'));
+    await click(q('.fab'));
+    ok(!!q('#f_title'), '일정 시트 열림');
+    setv('#f_time', '930');
+    setv('#f_title', '감천문화마을');
+    setv('#f_place', '감천문화마을');
+    await clickSel('[data-action="save-schedule"]');
+    ok(qa('.tl-item').length === 1, '일정 1개 추가', qa('.tl-item').length);
+    ok(text('.tl-time').indexOf('09:30') >= 0, '시간 09:30 정규화', text('.tl-time'));
+    ok(!!q('a.tl-map.kakao') && !!q('a.tl-map.google'), '카카오맵·구글맵 링크');
+
+    await click(q('.fab'));
+    setv('#f_title', '국밥');
+    setv('#f_time', '1200');
+    await clickSel('[data-action="save-schedule"]');
+    ok(qa('.tl-item').length === 2, '일정 2개', qa('.tl-item').length);
+    await click(q('[data-action="move-schedule"][data-dir="-1"]:not([disabled])'));
+    var titles = qa('.tl-title').map(function (e) { return e.textContent.trim(); });
+    ok(titles[0] === '국밥' && titles[1] === '감천문화마을', '위로 이동', titles.join(' > '));
+    await click(qa('[data-action="edit-schedule"]')[1]);
+    setv('#f_title', '감천문화마을 (수정)');
+    await clickSel('[data-action="save-schedule"]');
+    ok(text('.tl-item:nth-child(2) .tl-title').indexOf('수정') >= 0, '일정 수정', text('.tl-item:nth-child(2) .tl-title'));
+    await click(qa('[data-action="del-schedule"]')[1]);
+    ok(qa('.tl-item').length === 1, '일정 삭제', qa('.tl-item').length);
+    noOverflow('일정 목록');
+
+    /* ------------------------------------------- 4) 가계부 (외화·정산·CSV) */
+    await clickSel('[data-tab="money"]');
+    await click(q('.fab'));
+    setv('#f_amount', '39000');
+    setv('#f_currency', 'JPY');
+    ok(q('#f_rate').value && Number(q('#f_rate').value) > 0, '통화 바꾸면 환율 자동', q('#f_rate').value);
+    ok(text('#f_preview').indexOf('366,600') >= 0, '환산 미리보기', text('#f_preview'));
+    setv('#f_title', '라멘');
+    await clickSel('[data-action="save-expense"]');
+    ok(text('.sum-card .big').indexOf('366,600') >= 0, '총 지출 원화 환산', text('.sum-card .big'));
+    ok(text('.settle-row').length >= 0 && qa('.settle-row').length === 3, '정산 3명', qa('.settle-row').length);
+    ok(qa('.transfer').length === 2, '정산 이체 2건', qa('.transfer').length);
+
+    await click(q('.fab'));
+    setv('#f_amount', '20000');
+    setv('#f_title', '마사지');
+    await clickSel('[data-action="toggle-private"]');
+    await clickSel('[data-action="save-expense"]');
+    ok(text('.sum-card .big').indexOf('386,600') >= 0, '나만 보기 포함 총액', text('.sum-card .big'));
+    ok(text('.sum-card').indexOf('20,000원') >= 0, '나만 보기 금액 표시');
+    ok(qa('.transfer').length === 2 && w.document.body.textContent.indexOf('정산에서 빠졌어요') >= 0, '나만 보기는 정산에서 제외');
+
+    var csvText = '', csvName = '';
+    w.TL.UI.download = function (name, txt) { csvText = txt; csvName = name; };
+    await clickSel('[data-action="export-csv"]');
+    ok(csvText.charCodeAt(0) === 0xFEFF, 'CSV UTF-8 BOM');
+    ok(csvText.indexOf('라멘') > 0 && csvText.indexOf('366,600'.replace(',', '')) > 0, 'CSV 내용(라멘·원화금액)');
+    ok(csvText.indexOf('마사지') > 0 && csvText.indexOf(',Y,') > 0, 'CSV 나만 보기 표시');
+    ok(/가계부_모바일 테스트 여행_\d{4}-\d{2}-\d{2}\.csv/.test(csvName), 'CSV 파일명', csvName);
+    noOverflow('가계부');
+
+    /* ---------------------------------------------- 5) 기간 변경 → Day 증감 */
+    var day4Item = null;
+    await clickSel('[data-tab="schedule"]');
+    await click(q('.chip[data-day="d4"]'));
+    await click(q('.fab'));
+    setv('#f_title', '공항 이동');
+    setv('#f_time', '1600');
+    await clickSel('[data-action="save-schedule"]');
+    ok(qa('.tl-item').length === 1, '마지막 날 일정 추가');
+    await clickSel('[data-action="edit-trip"]');
+    await clickSel('[data-action="cal-toggle"]');
+    await pickDate('2026-12-05');
+    await pickDate('2026-12-06');
+    ok(text('#range-sub').indexOf('1박 2일') >= 0, '기간을 1박 2일로', text('#range-sub'));
+    await clickSel('[data-action="save-edit-trip"]');
+    ok(qa('.chips .chip').length === 3, 'Day 탭 3개로 줄어듦', qa('.chips .chip').length);
+    trip = S.trip(trip.id);
+    var moved = trip.data.schedules.filter(function (s) { return s.title === '공항 이동'; })[0];
+    ok(!!moved && moved.dayKey === 'd2', '사라진 날 일정은 마지막 날로 이동', moved && moved.dayKey);
+    ok(qa('.empty h3').length === 0 || text('.empty h3').indexOf('비어') < 0, '없어진 Day가 아니라 실제 날짜를 보여줌', text('.empty h3'));
+    var activeDay = qa('.chip.active')[0].getAttribute('data-day');
+    ok(activeDay === 'd1' || activeDay === 'd2', '없어진 Day 대신 실제 날짜 탭', activeDay);
+
+    /* ------------------------------------------------------- 6) 체크리스트 */
+    await clickSel('[data-tab="check"]');
+    ok(!!q('#chk-new'), '준비물 입력 있음');
+    setv('#chk-new', '여권');
+    var whoSel = q('#chk-who');
+    if (whoSel) setv('#chk-who', trip.members[0].id);
+    await clickSel('[data-action="add-check"]');
+    ok(qa('.chk').length === 1, '준비물 추가', qa('.chk').length);
+    await click(q('.chk .box'));
+    ok(q('.chk').className.indexOf('done') >= 0, '준비물 체크');
+    await click(q('.chk-main'));
+    ok(!!q('#f_who'), '준비물 수정 시트');
+    setv('#f_who', trip.members[1].id);
+    await clickSel('[data-action="save-check"]');
+    ok(S.trip(trip.id).data.checklist[0].assigneeId === trip.members[1].id, '담당자 지정');
+    await click(q('.chk .icon-btn'));
+    ok(qa('.chk').length === 0, '준비물 삭제', qa('.chk').length);
+    noOverflow('체크리스트');
+
+    /* -------------------------------------------------- 7) JSON 백업·복원 */
+    await clickSel('[data-action="go-home"]');
+    await clickSel('[data-action="open-settings"]');
+    var backup = S.exportJSON();
+    ok(backup.indexOf('모바일 테스트 여행') > 0, '내보낼 백업에 여행 포함');
+    ok(!!q('#json-file') && !!q('label[for="json-file"]'), '복원용 파일 입력·라벨');
+    var input = q('#json-file');
+    var dt = new w.DataTransfer();
+    dt.items.add(new w.File([backup], 'backup.json', { type: 'application/json' }));
+    input.files = dt.files;
+    input.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await sleep(500);
+    ok(S.trips().length >= 3, '파일에서 JSON 복원', S.trips().length);
+    ok(S.trips().filter(function (t) { return t.name === '모바일 테스트 여행'; }).length >= 2, '복원된 여행이 목록에');
+    ok(/모바일 테스트 여행/.test(w.document.body.textContent), '복원 후 홈 렌더');
+    noOverflow('홈');
+
+    /* --------------------------------------------- 8) 초대 링크 진입 흐름 */
+    var inv = document.getElementById('invite');
+    inv.src = '../index.html?qa=invite&trip=7KD2QM';
+    await sleep(1200);
+    var iw = inv.contentWindow, idoc = inv.contentDocument;
+    ok(!!idoc && !!idoc.querySelector('#f_code'), '초대 링크로 들어오면 참여 시트');
+    ok(idoc && idoc.querySelector('#f_code') && idoc.querySelector('#f_code').value === '7KD2QM', '초대 코드 자동 입력', idoc && idoc.querySelector('#f_code') && idoc.querySelector('#f_code').value);
+
+    /* ------------------------------------------------------- 9) 로드·오류 */
+    var res = w.performance.getEntriesByType('resource').filter(function (r) { return /\.(js|css)(\?|$)/.test(r.name); });
+    var bad = res.filter(function (r) { return r.responseStatus && r.responseStatus !== 200; });
+    ok(res.length >= 9, 'JS/CSS 리소스 로드 수', res.length);
+    ok(bad.length === 0, 'JS/CSS 200 OK', bad.map(function (b) { return b.responseStatus + ' ' + b.name; }).join(', '));
+    ok(errs.length === 0, '콘솔 오류 0건', errs.slice(0, 5).join(' | '));
+
+    finish();
+  }
+
+  function finish() {
+    var summary = pass + ' passed, ' + fails.length + ' failed';
+    lines.push('---- ' + summary + ' ----');
+    out.textContent = lines.join('\n');
+    window.__QA = { pass: pass, fails: fails, lines: lines, done: true, summary: summary };
+    document.title = 'QA ' + summary;
+  }
+
+  run().catch(function (e) {
+    fails.push('예외: ' + (e && e.stack || e));
+    log('HEAD', '예외: ' + (e && e.message));
+    finish();
+  });
+})();
+</script>
+</body>
+</html>
