@@ -204,7 +204,10 @@
       '<span class="trip-main">' +
         '<span class="row between" style="gap:6px">' +
           '<span class="trip-title">' + UI.esc(trip.name) + '</span>' +
-          '<span class="dday ' + dcls + '">' + UI.esc(dday) + '</span>' +
+          '<span class="row gap6" style="flex:none">' +
+            (trip.sample ? '<span class="pill gray">예시</span>' : '') +
+            '<span class="dday ' + dcls + '">' + UI.esc(dday) + '</span>' +
+          '</span>' +
         '</span>' +
         '<span class="trip-meta">' + UI.esc(sub) + '</span>' +
         '<span class="trip-foot">' +

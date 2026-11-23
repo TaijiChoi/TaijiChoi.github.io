@@ -345,60 +345,73 @@
       conn = { code: code, tripId: trip.id, unsubs: [] };
 
       var metaRef = fsMod.doc(db, 'trips', code);
-      var firstMeta = true;
+      var settled = false;
 
-      if (opts.create) {
-        var payload = metaPayload(trip);
-        payload.createdAt = new Date().toISOString();
-        payload.version = 1;
-        fsMod.setDoc(metaRef, payload).catch(function (e) { reportError(e); });
-        // 로컬 데이터를 하위 컬렉션으로 업로드
-        COLLS.forEach(function (coll) {
-          (trip.data[coll] || []).forEach(function (item) {
-            fsMod.setDoc(fsMod.doc(db, 'trips', code, coll, item.id), stripId(item)).catch(reportError);
-          });
-        });
-      }
-
-      conn.unsubs.push(fsMod.onSnapshot(metaRef, function (snap) {
-        if (!snap.exists()) {
-          if (firstMeta && !opts.create) {
-            reportError(new Error('초대 코드 ' + code + '에 해당하는 여행을 찾을 수 없습니다.'));
-            tlStateError('notfound');
-            closeConn();
-          }
-          firstMeta = false;
-          return;
+      return new Promise(function (resolve, reject) {
+        function done(err) {
+          if (settled) return;
+          settled = true;
+          if (err) reject(err); else resolve({ code: code });
         }
-        firstMeta = false;
-        var m = snap.data() || {};
-        trip.name = m.name || trip.name;
-        trip.destination = m.destination || trip.destination;
-        trip.startDate = m.startDate || trip.startDate;
-        trip.endDate = m.endDate || trip.endDate;
-        trip.baseCurrency = m.baseCurrency || trip.baseCurrency;
-        trip.members = Array.isArray(m.members) ? m.members : trip.members;
-        trip.rates = m.rates || trip.rates;
-        trip.remote = true;
-        if (!trip.id) trip.id = 'remote_' + code;
-        notify();
-      }, function (e) { reportError(e); }));
 
-      COLLS.forEach(function (coll) {
-        var colRef = fsMod.collection(db, 'trips', code, coll);
-        conn.unsubs.push(fsMod.onSnapshot(colRef, function (snap) {
-          trip.data[coll] = snap.docs.map(function (d) {
-            var v = d.data() || {};
-            v.id = d.id;
-            return v;
-          });
+        conn.unsubs.push(fsMod.onSnapshot(metaRef, function (snap) {
+          if (!snap.exists()) {
+            if (!opts.create) {
+              var e = new Error('초대 코드 ' + code + '에 해당하는 여행을 찾을 수 없습니다.');
+              tlStateError('notfound');
+              closeConn();
+              done(e);
+            } else {
+              done();
+            }
+            return;
+          }
+          var m = snap.data() || {};
+          trip.name = m.name || trip.name;
+          trip.destination = m.destination || trip.destination;
+          trip.startDate = m.startDate || trip.startDate;
+          trip.endDate = m.endDate || trip.endDate;
+          trip.baseCurrency = m.baseCurrency || trip.baseCurrency;
+          trip.members = Array.isArray(m.members) ? m.members : trip.members;
+          trip.rates = m.rates || trip.rates;
+          trip.remote = true;
           notify();
-        }, function (e) { reportError(e); }));
-      });
+          done();
+        }, function (e) {
+          reportError(e);
+          done(new Error(e && (e.code || e.message) ? (e.code || e.message) : '연결할 수 없습니다'));
+        }));
 
-      trip.remote = true;
-      notify();
-      return { code: code };
+        if (opts.create) {
+          var payload = metaPayload(trip);
+          payload.createdAt = new Date().toISOString();
+          payload.version = 1;
+          fsMod.setDoc(metaRef, payload).catch(reportError);
+          COLLS.forEach(function (coll) {
+            (trip.data[coll] || []).forEach(function (item) {
+              fsMod.setDoc(fsMod.doc(db, 'trips', code, coll, item.id), stripId(item)).catch(reportError);
+            });
+          });
+        }
+
+        COLLS.forEach(function (coll) {
+          var colRef = fsMod.collection(db, 'trips', code, coll);
+          conn.unsubs.push(fsMod.onSnapshot(colRef, function (snap) {
+            trip.data[coll] = snap.docs.map(function (d) {
+              var v = d.data() || {};
+              v.id = d.id;
+              return v;
+            });
+            notify();
+          }, function (e) { reportError(e); }));
+        });
+
+        trip.remote = true;
+        notify();
+
+        // 규칙/네트워크 오류로 응답이 없을 때를 대비한 안전 장치
+        setTimeout(function () { done(); }, 12000);
+      });
     });
   };
 
@@ -478,12 +491,20 @@
       data: { schedules: [], expenses: [], checklist: [] }
     };
     if (!existing) state.trips.push(trip);
+    var prevCurrent = state.currentTripId;
     state.currentTripId = trip.id;
     notify();
-    return Store.connect(trip.id, { code: code }).then(function (r) {
+    return Store.connect(trip.id, { code: code }).then(function () {
       // 내 닉네임을 일행에 자동 등록
       if (state.nickname) Store.addMember(trip.id, state.nickname);
       return trip;
+    }).catch(function (e) {
+      if (!existing) {
+        state.trips = state.trips.filter(function (t) { return t.id !== trip.id; });
+        state.currentTripId = prevCurrent;
+        notify();
+      }
+      throw e;
     });
   };
 

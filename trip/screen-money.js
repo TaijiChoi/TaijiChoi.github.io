@@ -15,6 +15,7 @@
     /* ---- 요약 카드 */
     var avg = (trip.members || []).length ? Math.round(t.shared / trip.members.length) : 0;
     html += '<div class="sum-card">' +
+      '<button class="sum-export" data-action="export-csv">' + UI.icon('download', 14) + 'CSV</button>' +
       '<div class="lab">총 지출 (원화 환산)</div>' +
       '<div class="big">' + Core.fmt(t.total) + '<span class="unit">원</span></div>' +
       '<div class="split">' +
@@ -65,7 +66,7 @@
     html += '<div class="section-title mt16" style="align-items:center">' +
       '<h2>지출 내역</h2>' +
       '<span class="row gap6">' +
-        '<button class="btn xs btn-ghost" data-action="export-csv">' + UI.icon('download', 15) + 'CSV</button>' +
+        '<span class="tiny muted">' + ((trip.data.expenses || []).length) + '건</span>' +
       '</span>' +
     '</div>';
     html += '<div class="chips small" style="margin:0 -16px 6px">' +

@@ -389,6 +389,10 @@
     });
     if (el) el.value = '';
     UI.refresh();
+    setTimeout(function () {
+      var again = document.getElementById('chk-new');
+      if (again) again.focus();
+    }, 30);
   };
   A['toggle-check'] = function (el) {
     var trip = TL.App.currentTrip();
