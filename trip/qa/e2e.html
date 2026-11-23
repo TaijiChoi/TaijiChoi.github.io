@@ -115,8 +115,10 @@
     await sleep(400);
     for (var i = 0; i < 60 && !ready(); i++) await sleep(80);
     w = f.contentWindow; doc = f.contentDocument;
+    wins = w.innerWidth;
     w.addEventListener('error', function (e) { errs.push('error: ' + (e.message || e.type)); });
     ok(ready(), '앱이 390x844에서 부팅');
+    ok(wins === 390 && w.innerHeight === 844, '뷰포트 390x844', wins + 'x' + w.innerHeight);
     if (!ready()) return finish();
     w.confirm = function () { return true; };   // 확인 대화상자는 통과
 
@@ -125,6 +127,7 @@
 
     /* ---------------------------------------------------- 1) 새 여행 + 달력 */
     await clickSel('[data-action="new-trip"]');
+    await sleep(320);
     noOverflow('새 여행 시트');
     ok(qa('input[type="date"]').length === 0, '네이티브 date 입력 없음');
     ok(!!q('.range-btn') && !!q('#cal-wrap'), '기간 버튼·달력 컨테이너');
@@ -134,6 +137,7 @@
     ok(sh && Math.abs(sh.bottom - 844) <= 2, '시트가 화면 아래에 붙음', sh && Math.round(sh.bottom));
 
     await clickSel('[data-action="cal-toggle"]');
+    await sleep(120);
     ok(!!q('.cal-grid'), '한 번 눌러 달력 펼침');
     var cr = rect('.cal');
     ok(cr && cr.height > 240 && cr.width <= 358, '달력 크기 정상', cr && Math.round(cr.width) + 'x' + Math.round(cr.height));
@@ -271,7 +275,7 @@
     trip = S.trip(trip.id);
     var moved = trip.data.schedules.filter(function (s) { return s.title === '공항 이동'; })[0];
     ok(!!moved && moved.dayKey === 'd2', '사라진 날 일정은 마지막 날로 이동', moved && moved.dayKey);
-    ok(qa('.empty h3').length === 0 || text('.empty h3').indexOf('비어') < 0, '없어진 Day가 아니라 실제 날짜를 보여줌', text('.empty h3'));
+    ok(text('.empty h3').indexOf('사전준비') < 0, '없어진 Day가 아니라 실제 날짜를 보여줌', text('.empty h3'));
     var activeDay = qa('.chip.active')[0].getAttribute('data-day');
     ok(activeDay === 'd1' || activeDay === 'd2', '없어진 Day 대신 실제 날짜 탭', activeDay);
 
