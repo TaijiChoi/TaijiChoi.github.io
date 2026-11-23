@@ -31,7 +31,12 @@ var ASSETS = [
 self.addEventListener('install', function (event) {
   event.waitUntil(
     caches.open(CACHE).then(function (cache) {
-      return cache.addAll(ASSETS.map(function (u) { return new Request(u, { cache: 'reload' }); }));
+      // 한 파일이 없어도 나머지는 캐시한다 (파일 하나 때문에 오프라인이 통째로 꺼지지 않게)
+      return Promise.all(ASSETS.map(function (u) {
+        return cache.add(new Request(u, { cache: 'reload' })).catch(function () {
+          console.warn('[triplog sw] 캐시 실패', u);
+        });
+      }));
     }).then(function () { return self.skipWaiting(); })
   );
 });
