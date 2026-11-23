@@ -80,7 +80,11 @@
       }).addTo(m);
 
       // 구글 타일이 하나도 안 뜨면(차단·오류) OSM으로 넘어간다
+      // 단, 이미 다른 지도로 다시 그려졌거나 사라진 지도의 늦은 오류는 무시한다
       var tiles = 0, stopped = false;
+      function alive() {
+        return !stopped && myPaint === paintedAt && map === m && document.getElementById('route-map') === el;
+      }
       function toOsm() {
         if (stopped) return;
         stopped = true;
@@ -88,11 +92,14 @@
         if (map === m) { map = null; mapEl = null; }
         fallbackToOsm('구글지도 타일을 불러오지 못해 OSM으로 바꿨어요');
       }
-      layer.on('tileload', function () { tiles++; });
-      layer.on('tileerror', function () { if (src.key === 'google' && !tiles) toOsm(); });
+      layer.on('tileload', function () { if (alive()) tiles++; });
+      layer.on('tileerror', function () {
+        if (!alive()) { stopped = true; return; }
+        if (src.key === 'google' && !tiles) toOsm();
+      });
       if (src.key === 'google') {
         setTimeout(function () {
-          if (myPaint !== paintedAt || stopped || tiles > 0) return;
+          if (stopped || !alive() || tiles > 0) return;
           toOsm();
         }, 6000);
       }
