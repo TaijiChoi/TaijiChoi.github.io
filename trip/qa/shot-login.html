@@ -36,10 +36,11 @@
   async function main() {
     var f1 = document.getElementById('f1');
     await waitReady(f1);
+    f1.contentWindow.localStorage.clear();
+    await loadFrame(f1, '../index.html?shot=login1&t=' + Date.now());
+    await waitReady(f1);
     var w1 = f1.contentWindow, S1 = w1.TL.Store;
-    w1.localStorage.clear();
-    await sleep(150);
-    S1.loadSample();
+    S1.clearAll();
     var t = S1.createTrip({
       name: '오사카 3박 4일', destination: '오사카 · 교토', startDate: '2026-12-05', endDate: '2026-12-08',
       members: [{ id: 'm1', name: '재원' }, { id: 'm2', name: '아내' }, { id: 'm3', name: '아들' }]
