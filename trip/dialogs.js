@@ -152,8 +152,9 @@
         return '<option value="' + d.key + '"' + (d.key === day ? ' selected' : '') + '>' + d.label +
           (d.date ? ' · ' + Core.isoLabel(d.date) : ' (출발 전)') + '</option>';
       }).join('') + '</select></div>';
-    html += '<div class="two"><div class="form-row"><label class="fl">시간</label>' +
-      '<input class="input" type="time" id="f_time" value="' + UI.esc(item && item.time || '') + '"></div>' +
+    html += '<div class="two"><div class="form-row"><label class="fl">시간 <span style="font-weight:500">(선택)</span></label>' +
+      '<input class="input" type="text" inputmode="numeric" id="f_time" placeholder="09:30" maxlength="5" value="' +
+      UI.esc(item && item.time || '') + '"><div class="hintline">예: 14:00 · 비우면 시간 미정</div></div>' +
       '<div class="form-row"><label class="fl">카테고리</label><select class="input" id="f_cat">' +
       Core.SCHED_CATS.map(function (c) {
         return '<option value="' + c.key + '"' + (item && item.category === c.key ? ' selected' : '') + '>' + c.label + '</option>';
@@ -177,7 +178,7 @@
     if (!title) { UI.toast('장소나 일정 이름을 입력해 주세요'); return; }
     var payload = {
       dayKey: UI.val('f_day') || 'prep',
-      time: UI.val('f_time') || '',
+      time: Core.normTime(UI.val('f_time')),
       title: title,
       category: UI.val('f_cat') || 'etc',
       place: UI.val('f_place').trim(),

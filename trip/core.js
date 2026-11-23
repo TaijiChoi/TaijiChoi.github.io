@@ -122,8 +122,26 @@
     var n = Core.diffDays(start, end);
     return Math.max(0, n);
   };
-  Core.dday = function (trip) {
-    if (!trip || !trip.startDate) return '';
+  /** '930' → '09:30', '14:5' → '14:05', 빈 값은 '' */
+  Core.normTime = function (v) {
+    var s = String(v == null ? '' : v).trim();
+    if (!s) return '';
+    var h, m;
+    if (/^\d{1,2}:\d{1,2}$/.test(s)) {
+      var p = s.split(':');
+      h = Number(p[0]); m = Number(p[1]);
+    } else {
+      var d = s.replace(/[^\d]/g, '');
+      if (d.length === 1 || d.length === 2) { h = Number(d); m = 0; }
+      else if (d.length === 3) { h = Number(d.slice(0, 1)); m = Number(d.slice(1)); }
+      else if (d.length === 4) { h = Number(d.slice(0, 2)); m = Number(d.slice(2)); }
+      else return s;
+    }
+    if (!(h >= 0 && h <= 23) || !(m >= 0 && m <= 59)) return s;
+    return pad(h) + ':' + pad(m);
+  };
+
+  Core.dday = function (trip) {    if (!trip || !trip.startDate) return '';
     var today = Core.todayISO();
     var toStart = Core.diffDays(today, trip.startDate);
     var toEnd = Core.diffDays(today, trip.endDate || trip.startDate);

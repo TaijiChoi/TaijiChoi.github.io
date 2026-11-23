@@ -299,12 +299,26 @@
   };
 
   /* -------------------------------------------------------- Firebase sync */
+  function withTimeout(p, ms, msg) {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        reject(new Error(msg || '응답이 없어요. 네트워크를 확인해 주세요.'));
+      }, ms);
+      p.then(function (v) { if (!done) { done = true; clearTimeout(timer); resolve(v); } },
+        function (e) { if (!done) { done = true; clearTimeout(timer); reject(e); } });
+    });
+  }
+  Store.withTimeout = withTimeout;
+
   function loadFb() {
     if (fs) return Promise.resolve(fs);
-    return Promise.all([
+    return withTimeout(Promise.all([
       import(FB_BASE + 'firebase-app.js'),
       import(FB_BASE + 'firebase-firestore.js')
-    ]).then(function (mods) {
+    ]), 15000, 'Firebase 라이브러리를 불러오지 못했어요. 네트워크를 확인해 주세요.').then(function (mods) {
       var appMod = mods[0], fsMod = mods[1];
       var cfg = state.firebase;
       if (!cfg) throw new Error('Firebase 설정이 없습니다. 설정에서 먼저 입력해 주세요.');
@@ -323,7 +337,8 @@
     app = null; fs = null; db = null;
     return loadFb().then(function (fsMod) {
       var ref = fsMod.doc(db, 'triplog_meta', 'ping');
-      return fsMod.getDoc(ref).then(function () { return true; });
+      return withTimeout(fsMod.getDoc(ref), 10000, 'Firestore 응답이 없어요. 데이터베이스 생성 여부와 네트워크를 확인해 주세요.')
+        .then(function () { return true; });
     }).catch(function (e) {
       state.firebase = prev;
       app = null; fs = null; db = null;
