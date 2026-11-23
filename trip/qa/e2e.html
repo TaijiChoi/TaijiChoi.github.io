@@ -111,8 +111,8 @@
 
     // 초기 상태: 이 브라우저 프로필의 이 사이트 테스트 데이터만 비운다
     w.localStorage.clear();
-    w.location.reload();
-    await sleep(400);
+    f.src = '../index.html?qa=1&t=' + Date.now();   // 캐시된 예전 파일 대신 새로 받는다
+    await sleep(600);
     for (var i = 0; i < 60 && !ready(); i++) await sleep(80);
     w = f.contentWindow; doc = f.contentDocument;
     wins = w.innerWidth;
@@ -317,7 +317,7 @@
 
     /* --------------------------------------------- 8) 초대 링크 진입 흐름 */
     var inv = document.getElementById('invite');
-    inv.src = '../index.html?qa=invite&trip=7KD2QM';
+    inv.src = '../index.html?qa=invite&t=' + Date.now() + '&trip=7KD2QM';
     await sleep(1200);
     var iw = inv.contentWindow, idoc = inv.contentDocument;
     ok(!!idoc && !!idoc.querySelector('#f_code'), '초대 링크로 들어오면 참여 시트');
