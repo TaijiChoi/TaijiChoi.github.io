@@ -32,6 +32,7 @@
 
   D.newTrip = function () {
     dlg = { kind: 'new-trip', members: [], id: null };
+    D.trip = null;
     var today = Core.todayISO();
     var nick = Store.settings().nickname;
     dlg.members = [{ id: Core.uid('m'), name: nick || '나' }];
@@ -79,6 +80,7 @@
   /* ======================================================== 여행 정보 수정 */
   D.editTrip = function (trip) {
     dlg = { kind: 'edit-trip', members: (trip.members || []).slice(), id: trip.id, trip: trip };
+    D.trip = trip;
     var html = '';
     html += '<div class="form-row"><label class="fl">여행 이름</label>' +
       '<input class="input" id="f_name" value="' + UI.esc(trip.name) + '" maxlength="40"></div>';
@@ -94,8 +96,8 @@
   };
 
   A['save-edit-trip'] = function () {
-    var trip = tripOf();
-    if (!trip) return;
+    var trip = tripOf() || TL.App.currentTrip();
+    if (!trip) { UI.toast('여행 정보를 찾을 수 없어요'); return; }
     var name = UI.val('f_name').trim() || trip.name;
     var start = UI.val('f_start') || trip.startDate;
     var end = UI.val('f_end') || start;
@@ -112,7 +114,7 @@
   };
 
   A['delete-trip'] = function () {
-    var trip = tripOf();
+    var trip = tripOf() || TL.App.currentTrip();
     if (!trip) return;
     if (!confirm('"' + trip.name + '" 여행을 이 기기에서 삭제할까요?\n(실시간 공유 중이면 다른 일행의 데이터는 그대로 남습니다)')) return;
     Store.removeTrip(trip.id);
@@ -142,6 +144,7 @@
     var item = null;
     ((trip.data && trip.data.schedules) || []).forEach(function (s) { if (s.id === id) item = s; });
     dlg = { kind: 'schedule', id: id || null, trip: trip };
+    D.trip = trip;
     var day = item ? item.dayKey : (dayKey || TL.App.view.day || 'd1');
     var html = '';
     html += '<div class="form-row"><label class="fl">날짜</label><select class="input" id="f_day">' +
@@ -168,8 +171,8 @@
   };
 
   A['save-schedule'] = function () {
-    var trip = tripOf();
-    if (!trip) return;
+    var trip = tripOf() || TL.App.currentTrip();
+    if (!trip) { UI.toast('여행 정보를 찾을 수 없어요'); return; }
     var title = UI.val('f_title').trim();
     if (!title) { UI.toast('장소나 일정 이름을 입력해 주세요'); return; }
     var payload = {
@@ -188,7 +191,7 @@
   };
 
   A['del-schedule'] = function (el) {
-    var trip = tripOf();
+    var trip = tripOf() || TL.App.currentTrip();
     var id = el.getAttribute('data-id') || dlg.id;
     if (!trip || !id) return;
     if (!confirm('이 일정을 삭제할까요?')) return;
@@ -210,6 +213,7 @@
       private: item ? !!item.private : false,
       dayKey: item ? item.dayKey : (TL.App.view.day && TL.App.view.day !== 'all' ? TL.App.view.day : 'd1')
     };
+    D.trip = trip;
     var cur = item ? item.currency : (trip.baseCurrency && trip.baseCurrency !== 'KRW' ? trip.baseCurrency : (trip.baseCurrency || 'KRW'));
     if (!item) {
       // 여행 기본 통화가 외화면 그 통화를 먼저 보여준다
@@ -330,8 +334,8 @@
   };
 
   A['save-expense'] = function () {
-    var trip = tripOf();
-    if (!trip) return;
+    var trip = tripOf() || TL.App.currentTrip();
+    if (!trip) { UI.toast('여행 정보를 찾을 수 없어요'); return; }
     var amount = Core.num(UI.val('f_amount'), 0);
     if (!(amount > 0)) { UI.toast('금액을 입력해 주세요'); return; }
     var currency = UI.val('f_currency') || 'KRW';
@@ -361,7 +365,7 @@
   };
 
   A['del-expense'] = function (el) {
-    var trip = tripOf();
+    var trip = tripOf() || TL.App.currentTrip();
     var id = el.getAttribute('data-id') || dlg.id;
     if (!trip || !id) return;
     if (!confirm('이 지출을 삭제할까요?')) return;
