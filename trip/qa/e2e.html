@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>트립로그 QA — 390x844</title>
+<style>
+  html,body{margin:0;background:#0F172A;color:#E5EDFB;font-family:-apple-system,"Malgun Gothic",sans-serif}
+  #wrap{display:flex;gap:16px;align-items:flex-start;padding:12px}
+  iframe{width:390px;height:844px;border:0;border-radius:14px;background:#fff;flex:none}
+  #out{margin:0;padding:12px;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;max-width:640px}
+  .p{color:#5BE49B}.f{color:#FF8A8A}.h{color:#93C5FD}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <iframe id="app" src="../index.html?qa=1" title="트립로그 390x844"></iframe>
+  <pre id="out">running…</pre>
+</div>
+<iframe id="invite" style="position:absolute;left:-2000px;top:0" title="invite"></iframe>
+<script>
+(function () {
+  'use strict';
+  var out = document.getElementById('out');
+  var lines = [], pass = 0, fails = [];
+  var f = document.getElementById('app');
+  var errs = [];
+
+  function log(kind, msg, extra) {
+    var tag = kind === 'PASS' ? 'PASS' : kind === 'FAIL' ? 'FAIL' : '--';
+    lines.push(tag + ' ' + msg + (extra != null && extra !== '' ? '  [' + extra + ']' : ''));
+    out.textContent = lines.join('\n');
+  }
+  function ok(cond, msg, extra) {
+    if (cond) { pass++; log('PASS', msg); }
+    else { fails.push(msg + (extra != null ? ' :: ' + extra : '')); log('FAIL', msg, extra); }
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  var wins = 0, doc = null;
+  function q(sel) { doc = f.contentDocument || doc; return doc.querySelector(sel); }
+  function qa(sel) { doc = f.contentDocument || doc; return Array.prototype.slice.call(doc.querySelectorAll(sel)); }
+  async function click(el, wait) {
+    if (!el) throw new Error('click target missing');
+    el.click();
+    await sleep(wait == null ? 45 : wait);
+  }
+  async function clickSel(sel) { await click(q(sel)); }
+  function setv(sel, v) {
+    var el = q(sel);
+    if (!el) throw new Error('no field ' + sel);
+    el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function text(sel) { var el = q(sel); return el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : ''; }
+  async function waitFor(sel, ms) {
+    var t0 = Date.now();
+    while (Date.now() - t0 < (ms || 12000)) {
+      if (q(sel)) return true;
+      await sleep(120);
+    }
+    return false;
+  }
+  function rect(sel) { var el = q(sel); return el ? el.getBoundingClientRect() : null; }
+  function noOverflow(label) {
+    var sw = doc.documentElement.scrollWidth, iw = wins;
+    ok(sw <= iw + 1, '가로 스크롤 없음 · ' + label, sw + ' / ' + iw);
+  }
+  function hitTest(sel, label) {
+    var el = q(sel);
+    if (!el) { ok(false, '요소 있음 · ' + label); return; }
+    el.scrollIntoView({ block: 'center' });
+    var r = el.getBoundingClientRect();
+    var hit = doc.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    ok(!!hit && (hit === el || el.contains(hit)), '가려지지 않고 누를 수 있음 · ' + label, hit ? (hit.className || hit.tagName) : 'none');
+  }
+  function ready() {
+    try {
+      var w = f.contentWindow;
+      return !!(w && w.TL && w.TL.App && w.document && w.document.getElementById('screen'));
+    } catch (e) { return false; }
+  }
+  async function waitReady(timeout) {
+    var t0 = Date.now();
+    while (Date.now() - t0 < (timeout || 8000)) {
+      if (ready()) return true;
+      await sleep(60);
+    }
+    return false;
+  }
+  async function pickDate(iso) {
+    for (var i = 0; i < 14; i++) {
+      var cell = q('.cal-day[data-date="' + iso + '"]');
+      if (cell) { await click(cell, 60); return true; }
+      var next = q('[data-action="cal-next"]');
+      if (!next) return false;
+      await click(next, 60);
+    }
+    return false;
+  }
+  function memberCount() { return qa('#member-list .mchip').length; }
+
+  window.__QA = { pass: 0, fails: [], lines: lines, done: false };
+
+  async function run() {
+    log('HEAD', '트립로그 모바일 390x844 통합 테스트 시작');
+    var w = f.contentWindow;
+
+    // 부트 오류 수집 (앱이 그려진 뒤부터)
+    w.addEventListener('error', function (e) { errs.push('error: ' + (e.message || e.type)); });
+    w.addEventListener('unhandledrejection', function (e) { errs.push('rejection: ' + (e.reason && e.reason.message || e.reason)); });
+    var cerr = w.console.error;
+    w.console.error = function () { errs.push('console.error: ' + Array.prototype.join.call(arguments, ' ')); cerr.apply(w.console, arguments); };
+
+    doc = f.contentDocument;
+    var today = new Date();
+    log('INFO', 'viewport ' + w.innerWidth + 'x' + w.innerHeight + ' / tz ' + (w.Intl.DateTimeFormat().resolvedOptions().timeZone));
+
+    // 초기 상태: 이 브라우저 프로필의 이 사이트 테스트 데이터만 비운다
+    w.localStorage.clear();
+    // 첫 방문자와 같은 상태로: 기존 SW 등록을 풀고 앱 셸 캐시를 비운다 → 새 SW가 설치하며 프리캐시한다
+    try {
+      var regs = await w.navigator.serviceWorker.getRegistrations();
+      for (var ri = 0; ri < regs.length; ri++) { try { await regs[ri].unregister(); } catch (e2) {} }
+    } catch (e) {}
+    try {
+      var ks = await w.caches.keys();
+      await Promise.all(ks.map(function (k) { return caches.delete(k); }));
+    } catch (e) {}
+    await new Promise(function (res) {
+      var done = false;
+      function on() { if (done) return; done = true; f.removeEventListener('load', on); res(); }
+      f.addEventListener('load', on);
+      f.src = '../index.html?qa=1&t=' + Date.now();   // 캐시된 예전 파일 대신 새로 받는다
+      setTimeout(function () { if (!done) { done = true; f.removeEventListener('load', on); res(); } }, 8000);
+    });
+    await sleep(200);
+    w = f.contentWindow; doc = f.contentDocument;
+    for (var i = 0; i < 60 && !ready(); i++) await sleep(80);
+    wins = w.innerWidth;
+    w.addEventListener('error', function (e) { errs.push('error: ' + (e.message || e.type)); });
+    ok(ready(), '앱이 390x844에서 부팅');
+    ok(wins === 390 && w.innerHeight === 844, '뷰포트 390x844', wins + 'x' + w.innerHeight);
+    if (!ready()) return finish();
+    w.confirm = function () { return true; };   // 확인 대화상자는 통과
+
+    var S = w.TL.Store;
+    ok(S.trips().length >= 1, '첫 실행 예시 여행 자동 로드', S.trips().length);
+
+    /* ---------------------------------------------------- 1) 새 여행 + 달력 */
+    await clickSel('[data-action="new-trip"]');
+    await sleep(320);
+    noOverflow('새 여행 시트');
+    ok(qa('input[type="date"]').length === 0, '네이티브 date 입력 없음');
+    ok(!!q('.range-btn') && !!q('#cal-wrap'), '기간 버튼·달력 컨테이너');
+    ok(q('#cal-wrap').className.indexOf('hide') >= 0, '달력은 처음엔 접힘');
+    var sh = rect('.sheet');
+    ok(sh && sh.width <= 390 + 1, '시트 폭이 화면 안', sh && Math.round(sh.width));
+    ok(sh && Math.abs(sh.bottom - 844) <= 2, '시트가 화면 아래에 붙음', sh && Math.round(sh.bottom));
+
+    await clickSel('[data-action="cal-toggle"]');
+    await sleep(120);
+    ok(!!q('.cal-grid'), '한 번 눌러 달력 펼침');
+    var cr = rect('.cal');
+    ok(cr && cr.height > 240 && cr.width <= 358, '달력 크기 정상', cr && Math.round(cr.width) + 'x' + Math.round(cr.height));
+    ok(qa('.cal-day').length === 42, '42칸 달력', qa('.cal-day').length);
+    noOverflow('달력 펼친 시트');
+
+    await pickDate('2026-12-05');
+    ok(text('#range-label').indexOf('12.5') >= 0, '시작일 12.5 선택', text('#range-label'));
+    ok(text('#range-sub').indexOf('종료일') >= 0, '종료일 안내');
+    await pickDate('2026-12-08');
+    ok(text('#range-label').indexOf('12.8') >= 0 && text('#range-sub').indexOf('3박 4일') >= 0, '기간 12.5~12.8 · 3박 4일', text('#range-label') + ' / ' + text('#range-sub'));
+    ok(q('#cal-wrap').className.indexOf('hide') >= 0, '기간을 다 고르면 달력 접힘');
+    ok(q('#f_start').value === '2026-12-05' && q('#f_end').value === '2026-12-08', '숨은 값 동기화');
+
+    setv('#f_name', '모바일 테스트 여행');
+    setv('#f_dest', '부산');
+    setv('#member-new', '아내');
+    await clickSel('[data-action="add-member-chip"]');
+    setv('#member-new', '아들');
+    await clickSel('[data-action="add-member-chip"]');
+    setv('#member-new', '동생');
+    await clickSel('[data-action="add-member-chip"]');
+    ok(memberCount() === 4, '일행 칩 4개', memberCount());
+    ok(qa('#member-list .chip-x').length === 4, '칩마다 삭제 버튼');
+    var before = memberCount();
+    await click(qa('#member-list .chip-x')[3]);
+    ok(memberCount() === before - 1, '칩 삭제로 1명 빠짐', memberCount());
+    setv('#member-new', '아내');
+    await clickSel('[data-action="add-member-chip"]');
+    ok(memberCount() === before - 1, '중복 이름은 추가 안 됨', memberCount());
+
+    await clickSel('[data-action="save-new-trip"]');
+    ok(/\/t\//.test(w.location.hash), '여행 화면으로 이동', w.location.hash);
+    var trip = S.trips().filter(function (t) { return t.name === '모바일 테스트 여행'; })[0];
+    ok(!!trip, '여행 저장됨');
+    ok(trip && trip.startDate === '2026-12-05' && trip.endDate === '2026-12-08', '저장된 기간', trip && trip.startDate + '~' + trip.endDate);
+    ok(trip && trip.members.length === 3, '저장된 일행 3명', trip && trip.members.length);
+    ok(qa('.chips .chip').length === 5, 'Day 탭 5개(사전준비+4)', qa('.chips .chip').length);
+    ok(!!q('.people-bar') && !!q('[data-action="manage-members"]'), '상단 일행 줄·관리 버튼');
+    noOverflow('일정 탭');
+
+    /* ------------------------------------------------------- 2) 일행 관리 */
+    await clickSel('[data-action="manage-members"]');
+    ok(!!q('.mem-rows') && qa('.mrow').length === 3, '일행 관리 목록 3명', qa('.mrow').length);
+    setv('#mem-new', '친구');
+    await clickSel('[data-action="mem-add"]');
+    ok(qa('.mrow').length === 4, '일행 추가', qa('.mrow').length);
+    await click(qa('[data-action="mem-edit"]')[3]);
+    ok(!!q('#mem-edit-input'), '이름 수정 입력 열림');
+    setv('#mem-edit-input', '친구2');
+    await click(qa('[data-action="mem-save"]')[0]);
+    ok(S.trips().filter(function (t) { return t.id === trip.id; })[0].members.some(function (m) { return m.name === '친구2'; }), '이름 수정 저장');
+    await click(qa('[data-action="mem-set-me"]')[3]);
+    ok(S.meId(S.trip(trip.id), null) === S.trip(trip.id).members[3].id, '내 이름 지정');
+    await click(qa('[data-action="mem-del"]')[3]);
+    ok(qa('.mrow').length === 3, '일행 삭제', qa('.mrow').length);
+    await clickSel('[data-action="close-modal"]');
+    ok(!q('.modal'), '시트 닫힘');
+
+    /* ------------------------------------------------- 3) 일정 추가·이동·수정 */
+    await click(q('.chip[data-day="d2"]'));
+    await click(q('.fab'));
+    ok(!!q('#f_title'), '일정 시트 열림');
+    setv('#f_time', '930');
+    setv('#f_title', '감천문화마을');
+    setv('#f_place', '감천문화마을');
+    await clickSel('[data-action="save-schedule"]');
+    ok(qa('.tl-item').length === 1, '일정 1개 추가', qa('.tl-item').length);
+    ok(text('.tl-time').indexOf('09:30') >= 0, '시간 09:30 정규화', text('.tl-time'));
+    ok(!!q('a.tl-map.kakao') && !!q('a.tl-map.google'), '카카오맵·구글맵 링크');
+
+    await click(q('.fab'));
+    setv('#f_title', '국밥');
+    setv('#f_time', '1200');
+    await clickSel('[data-action="save-schedule"]');
+    ok(qa('.tl-item').length === 2, '일정 2개', qa('.tl-item').length);
+    await click(q('[data-action="move-schedule"][data-dir="-1"]:not([disabled])'));
+    var titles = qa('.tl-title').map(function (e) { return e.textContent.trim(); });
+    ok(titles[0] === '국밥' && titles[1] === '감천문화마을', '위로 이동', titles.join(' > '));
+    await click(qa('[data-action="edit-schedule"]')[1]);
+    setv('#f_title', '감천문화마을 (수정)');
+    await clickSel('[data-action="save-schedule"]');
+    ok(text('.tl-item:nth-child(2) .tl-title').indexOf('수정') >= 0, '일정 수정', text('.tl-item:nth-child(2) .tl-title'));
+    await click(qa('[data-action="del-schedule"]')[1]);
+    ok(qa('.tl-item').length === 1, '일정 삭제', qa('.tl-item').length);
+    noOverflow('일정 목록');
+
+    /* ------------------------------------------- 4) 가계부 (외화·정산·CSV) */
+    await clickSel('[data-tab="money"]');
+    await click(q('.fab'));
+    setv('#f_amount', '39000');
+    setv('#f_currency', 'JPY');
+    await sleep(200);
+    ok(q('#f_rate').value && Number(q('#f_rate').value) > 0, '통화 바꾸면 환율 자동', q('#f_rate').value);
+    setv('#f_rate', '9.4');   // 자동 조회가 흔들리지 않게 고정 (이후 계산 결정적)
+    ok(text('#f_preview').indexOf('366,600') >= 0, '환산 미리보기', text('#f_preview'));
+    setv('#f_title', '라멘');
+    await clickSel('[data-action="save-expense"]');
+    ok(text('.sum-card .big').indexOf('366,600') >= 0, '총 지출 원화 환산', text('.sum-card .big'));
+    ok(text('.settle-row').length >= 0 && qa('.settle-row').length === 3, '정산 3명', qa('.settle-row').length);
+    ok(qa('.transfer').length === 2, '정산 이체 2건', qa('.transfer').length);
+
+    await click(q('.fab'));
+    setv('#f_amount', '20000');
+    setv('#f_title', '마사지');
+    await clickSel('[data-action="toggle-private"]');
+    await clickSel('[data-action="save-expense"]');
+    ok(text('.sum-card .big').indexOf('386,600') >= 0, '나만 보기 포함 총액', text('.sum-card .big'));
+    ok(text('.sum-card').indexOf('20,000원') >= 0, '나만 보기 금액 표시');
+    ok(qa('.transfer').length === 2 && w.document.body.textContent.indexOf('정산에서 빠졌어요') >= 0, '나만 보기는 정산에서 제외');
+
+    var csvText = '', csvName = '';
+    w.TL.UI.download = function (name, txt) { csvText = txt; csvName = name; };
+    await clickSel('[data-action="export-csv"]');
+    ok(csvText.charCodeAt(0) === 0xFEFF, 'CSV UTF-8 BOM');
+    ok(csvText.indexOf('라멘') > 0 && csvText.indexOf('366,600'.replace(',', '')) > 0, 'CSV 내용(라멘·원화금액)');
+    ok(csvText.indexOf('마사지') > 0 && csvText.indexOf(',Y,') > 0, 'CSV 나만 보기 표시');
+    ok(/가계부_모바일 테스트 여행_\d{4}-\d{2}-\d{2}\.csv/.test(csvName), 'CSV 파일명', csvName);
+    noOverflow('가계부');
+
+    /* ============ 4b) v15: 장소 검색(카카오) · 동선 지도 · 드래그 ============ */
+    await clickSel('[data-tab="schedule"]');
+    await click(q('.chip[data-day="d1"]'));
+    await click(q('.fab'));
+    ok(!!q('#pl_q') && qa('.pl-mode').length === 3, '장소 검색창·모드 탭', qa('.pl-mode').length);
+    setv('#pl_q', '강남역');
+    await clickSel('[data-action="pl-search"]');
+    var plOk = await waitFor('.pl-row', 15000);
+    ok(plOk, '카카오 장소 검색 실제 호출', qa('.pl-row').length + '건');
+    if (plOk) {
+      ok(text('.pl-row').indexOf('강남') >= 0, '검색 결과에 강남', text('.pl-row').slice(0, 40));
+      await click(q('.pl-row'), 150);
+      ok(text('#pl-picked').indexOf('강남') >= 0, '선택한 장소 칩', text('#pl-picked'));
+      setv('#f_time', '1000');
+      setv('#f_title', '');
+      await clickSel('[data-action="save-schedule"]');
+      var withGeo = S.trip(trip.id).data.schedules.filter(function (x) { return x.dayKey === 'd1' && x.lat; });
+      ok(withGeo.length === 1, '좌표가 저장된 일정', withGeo.length);
+      ok(withGeo[0] && Math.abs(withGeo[0].lat - 37.5) < 0.2, '좌표 위도', withGeo[0] && withGeo[0].lat);
+      ok(withGeo[0] && withGeo[0].source === 'kakao', '장소 출처 kakao', withGeo[0] && withGeo[0].source);
+    } else {
+      await clickSel('[data-action="close-modal"]');
+    }
+
+    // 두 번째 장소 → 동선 지도
+    await click(q('.fab'));
+    setv('#pl_q', '서울역');
+    await clickSel('[data-action="pl-search"]');
+    if (await waitFor('.pl-row', 15000)) await click(q('.pl-row'), 150);
+    setv('#f_time', '1400');
+    setv('#f_title', '');
+    await clickSel('[data-action="save-schedule"]');
+    var d1geo = S.trip(trip.id).data.schedules.filter(function (x) { return x.dayKey === 'd1' && x.lat; });
+    ok(d1geo.length === 2, 'd1 좌표 일정 2개', d1geo.length);
+    var mapOk = await waitFor('.leaflet-container', 15000);
+    ok(mapOk, '동선 지도(Leaflet) 렌더');
+    ok(qa('.rt-icon').length === 2, '번호 핀 2개', qa('.rt-icon').length);
+    ok(qa('.leaflet-overlay-pane path').length >= 1, '순서선(폴리라인)');
+    ok(qa('.seg-row').length === 1, '구간 정보 1개', qa('.seg-row').length);
+    ok(text('.seg-row').indexOf('도보 약') >= 0, '구간 도보 시간', text('.seg-row').slice(0, 60));
+    ok(!!q('.seg-links a'), '구간 길찾기 링크');
+    noOverflow('동선 지도');
+
+    /* ===== v17: 구글지도 타일 · 지도 종류 전환 · 전체 동선 ===== */
+    ok(!!q('.map-src') && qa('.map-src .ms-btn').length === 2, '지도 종류 버튼 2개', qa('.map-src .ms-btn').length);
+    ok(q('.map-src .ms-btn.active') && q('.map-src .ms-btn.active').getAttribute('data-src') === 'google',
+      '기본 지도는 구글지도', q('.map-src .ms-btn.active') && q('.map-src .ms-btn.active').getAttribute('data-src'));
+    ok(text('.map-note').indexOf('Google 지도') >= 0, '지도 안내가 구글지도', text('.map-note').slice(0, 40));
+    hitTest('.map-src .ms-btn[data-src="osm"]', 'OSM 전환 버튼');
+    var wantUrl = w.TL.Core.routeMapUrl(w.TL.Core.sortedSchedules(S.trip(trip.id).data, 'd1').filter(w.TL.Core.hasGeo));
+    var allBtn = q('a.map-all');
+    ok(!!allBtn && /maps\/dir\/\?api=1/.test(allBtn.getAttribute('href')), '전체 동선 버튼 링크', allBtn && allBtn.getAttribute('href'));
+    ok(!!allBtn && allBtn.getAttribute('href') === wantUrl, '전체 동선 URL이 좌표 일정과 일치', allBtn && allBtn.getAttribute('href'));
+    ok(!!allBtn && allBtn.getAttribute('target') === '_blank', '전체 동선은 새 탭');
+    ok(!!allBtn && text('a.map-all').indexOf('구글지도로 전체 동선 보기') >= 0, '전체 동선 버튼 문구', text('a.map-all'));
+    var gTiles = 0, gFirst = '';
+    for (var gt = 0; gt < 50; gt++) {
+      var gims = qa('#route-map img.leaflet-tile').filter(function (im) { return im.naturalWidth > 0; });
+      if (gims.length >= 3) {
+        gTiles = gims.filter(function (im) { return /^https:\/\/mt[0-3]\.google\.com\/vt\//.test(im.src); }).length;
+        gFirst = gims[0].src;
+        if (gTiles >= 3) break;
+      }
+      await sleep(200);
+    }
+    ok(gTiles >= 3, '구글지도 타일이 실제로 그려짐', gTiles + '장 · ' + gFirst);
+    ok(/lyrs=m/.test(gFirst) && /hl=ko/.test(gFirst), '구글 타일 주소(지도·한국어)', gFirst);
+
+    await click(q('.map-src .ms-btn[data-src="osm"]'));
+    await sleep(400);
+    ok(q('.map-src .ms-btn.active') && q('.map-src .ms-btn.active').getAttribute('data-src') === 'osm', 'OSM으로 전환됨');
+    ok(text('.map-note').indexOf('OpenStreetMap') >= 0 && text('.map-note').indexOf('Google 지도') < 0, 'OSM 안내로 바뀜', text('.map-note').slice(0, 40));
+    var oTiles = 0, oFirst = '';
+    for (var ot = 0; ot < 50; ot++) {
+      var oims = qa('#route-map img.leaflet-tile').filter(function (im) { return im.naturalWidth > 0; });
+      oTiles = oims.filter(function (im) { return /^https:\/\/tile\.openstreetmap\.org\//.test(im.src); }).length;
+      if (oims.length) oFirst = oims[0].src;
+      if (oTiles >= 3) break;
+      await sleep(200);
+    }
+    ok(oTiles >= 3, 'OSM 타일도 그려짐', oTiles + '장 · ' + oFirst);
+    noOverflow('OSM 전환');
+
+    await click(q('.map-src .ms-btn[data-src="google"]'));
+    await sleep(500);
+    ok(q('.map-src .ms-btn.active') && q('.map-src .ms-btn.active').getAttribute('data-src') === 'google', '구글지도로 되돌아옴');
+    ok(w.localStorage.getItem('triplog.mapSource') === 'google', '마지막 지도 선택 저장', w.localStorage.getItem('triplog.mapSource'));
+    ok(qa('.rt-icon').length === 2 && qa('.seg-row').length === 1, '전환 뒤에도 핀·구간 유지', qa('.rt-icon').length + '/' + qa('.seg-row').length);
+
+    // 구글 타일이 막혔을 때 OSM으로 자동 전환되는지 (타일 주소를 404로 바꿔 재현)
+    var gUrl = w.TL.Core.MAP_SOURCES.google.url;
+    w.TL.Core.MAP_SOURCES.google.url = './__missing__/{z}/{x}/{y}.png';
+    w.TL.App.setMapSource('google', { silent: true });
+    var fellBack = false;
+    for (var fb = 0; fb < 40; fb++) {
+      var act = q('.map-src .ms-btn.active');
+      if (act && act.getAttribute('data-src') === 'osm') { fellBack = true; break; }
+      await sleep(150);
+    }
+    ok(fellBack, '구글 타일 실패 → OSM 자동 전환', q('.map-src .ms-btn.active') && q('.map-src .ms-btn.active').getAttribute('data-src'));
+    ok(text('#toast').indexOf('OSM으로 바꿨어요') >= 0, '자동 전환 안내 토스트', text('#toast').slice(0, 40));
+    w.TL.Core.MAP_SOURCES.google.url = gUrl;
+    await click(q('.map-src .ms-btn[data-src="google"]'));
+    await sleep(500);
+    ok(q('.map-src .ms-btn.active') && q('.map-src .ms-btn.active').getAttribute('data-src') === 'google', '자동 전환 뒤 구글지도 복귀');
+    noOverflow('자동 전환');
+    await sleep(2600);
+    ok(q('.map-src .ms-btn.active') && q('.map-src .ms-btn.active').getAttribute('data-src') === 'google' &&
+      w.localStorage.getItem('triplog.mapSource') === 'google', '늦게 도착한 타일 오류로 지도가 바뀌지 않음', w.localStorage.getItem('triplog.mapSource'));
+
+    // 드래그로 순서 바꾸기 (포인터 이벤트)
+    var titlesBefore = qa('.tl-item .tl-title').map(function (e) { return e.textContent.trim(); });
+    var handles = qa('[data-drag="handle"]');
+    if (handles.length === 2) {
+      var hr = handles[1].getBoundingClientRect();
+      var fr = q('.tl-item').getBoundingClientRect();
+      function pev(type, x, y, target) {
+        var e = new w.PointerEvent(type, {
+          bubbles: true, cancelable: true, clientX: x, clientY: y,
+          pointerId: 7, pointerType: 'touch', button: 0, buttons: type === 'pointerup' ? 0 : 1
+        });
+        (target || doc).dispatchEvent(e);
+      }
+      pev('pointerdown', hr.left + 8, hr.top + 8, handles[1]);
+      pev('pointermove', hr.left + 8, fr.top + 6);
+      await sleep(80);
+      pev('pointerup', hr.left + 8, fr.top + 6);
+      await sleep(200);
+      var titlesAfter = qa('.tl-item .tl-title').map(function (e) { return e.textContent.trim(); });
+      ok(titlesAfter[0] === titlesBefore[1] && titlesAfter[1] === titlesBefore[0], '드래그로 순서 변경', titlesBefore.join(' > ') + ' → ' + titlesAfter.join(' > '));
+    } else {
+      ok(false, '드래그 핸들 2개', handles.length);
+    }
+
+    // 다른 날로 이동 / 복사
+    await click(q('[data-action="edit-schedule"]'));
+    ok(!!q('#f_to_day'), '수정 시트에 다른 날 선택');
+    setv('#f_to_day', 'd3');
+    await clickSel('[data-action="sched-move-day"]');
+    ok(S.trip(trip.id).data.schedules.filter(function (x) { return x.dayKey === 'd3'; }).length === 1, '다른 날로 이동');
+    await click(q('.chip[data-day="d1"]'));
+    await click(q('[data-action="edit-schedule"]'));
+    setv('#f_to_day', 'd4');
+    await clickSel('[data-action="sched-copy-day"]');
+    ok(S.trip(trip.id).data.schedules.filter(function (x) { return x.dayKey === 'd4'; }).length === 1, '다른 날로 복사');
+    ok(S.trip(trip.id).data.schedules.filter(function (x) { return x.dayKey === 'd1'; }).length === 1, '복사 후 원본 유지');
+
+    // 시간 겹침 경고
+    await click(q('.chip[data-day="d2"]'));
+    await click(q('.fab'));
+    setv('#f_title', '김밥');
+    setv('#f_time', '1230');   // d2의 12:00 국밥과 30분 겹침
+    await clickSel('[data-action="save-schedule"]');
+    ok(!!q('.warn-bar') && text('.warn-bar').indexOf('겹') >= 0, '시간 겹침 안내', text('.warn-bar').slice(0, 50));
+    ok(!!q('.tl-warn'), '카드에 겹침 배지');
+
+    /* ============ 4c) v15: 환율 자동 · 카드 실청구액 ============ */
+    await clickSel('[data-tab="money"]');
+    await click(q('.fab'));
+    ok(!!q('#rate-status'), '환율 상태 줄');
+    setv('#f_currency', 'JPY');
+    var autoOk = false;
+    for (var ai = 0; ai < 60; ai++) {
+      if (text('#rate-status').indexOf('자동 환율') >= 0) { autoOk = true; break; }
+      await sleep(200);
+    }
+    ok(autoOk, '자동 환율 실제 조회', text('#rate-status'));
+    var autoRate = Number(q('#f_rate').value);
+    ok(autoRate > 5 && autoRate < 20, '자동 환율 값', autoRate);
+    setv('#f_amount', '3900');
+    setv('#f_title', '카드 라멘');
+    setv('#f_charged', '36000');
+    await clickSel('[data-action="toggle-charged"]');
+    ok(text('#f_preview').indexOf('실청구') >= 0, '실청구 미리보기', text('#f_preview'));
+    await clickSel('[data-action="save-expense"]');
+    var ce = S.trip(trip.id).data.expenses.filter(function (e) { return e.title === '카드 라멘'; })[0];
+    ok(ce && ce.chargedKRW === 36000, '실청구액 저장', ce && ce.chargedKRW);
+    ok(ce && ce.amount === 3900 && ce.currency === 'JPY', '외화 금액·통화 보존', ce && (ce.amount + ' ' + ce.currency));
+    ok(w.document.body.textContent.indexOf('카드 36,000원') >= 0, '목록에 카드 청구액', text('.sum-card').slice(0, 40));
+    noOverflow('가계부 v15');
+
+    /* ============ 4d) v15: 예약 보관함 ============ */
+    await clickSel('[data-tab="schedule"]');
+    await clickSel('[data-action="open-reserve"]');
+    ok(!!q('#res-text'), '예약 보관함 열림');
+    var RES = '[항공] 대한항공 KE721\n2026년 12월 5일 09:20 인천국제공항 → 간사이국제공항 11:10\n예약번호: ABC123\n\n[숙소] 난바 스테이 호텔\n체크인 2026-12-05 15:00\n체크아웃 2026-12-08 11:00\n예약번호 NMB-7788';
+    setv('#res-text', RES);
+    await clickSel('[data-action="res-parse"]');
+    ok(qa('.res-row').length === 3, '예약 초안 3개', qa('.res-row').length);
+    ok(text('.sheet-body').indexOf('KE721') >= 0, '초안에 편명', text('.sheet-body').slice(0, 60));
+    var beforeRes = S.trip(trip.id).data.schedules.length;
+    await clickSel('[data-action="res-add"]');
+    ok(S.trip(trip.id).data.schedules.length === beforeRes + 3, '예약에서 일정 3개 추가', S.trip(trip.id).data.schedules.length - beforeRes);
+    ok(S.trip(trip.id).data.reservations.length === 1, '예약 원본 보관', S.trip(trip.id).data.reservations.length);
+    ok(S.trip(trip.id).data.reservations[0].text.indexOf('KE721') > 0, '예약 원문 보존');
+
+    /* ============ 4e) v15: 서비스 워커 · 오프라인 배지 ============ */
+    var reg = null;
+    for (var rgi = 0; rgi < 20; rgi++) {
+      try { reg = await w.navigator.serviceWorker.getRegistration(); } catch (e) {}
+      if (reg) break;
+      await sleep(200);
+    }
+    ok(!!reg, '서비스 워커 등록', reg && reg.scope);
+    var cacheKeys = [];
+    try { cacheKeys = await w.caches.keys(); } catch (e) {}
+    var coreSrc = q('script[src*="core.js"]') ? q('script[src*="core.js"]').getAttribute('src') : '';
+    var VER = (coreSrc.match(/v=(\d+)/) || [])[1] || '0';
+    ok(cacheKeys.indexOf('triplog-v' + VER) >= 0, '앱 셸 캐시 생성 (v' + VER + ')', cacheKeys.join(','));
+    var shellHit = false;
+    var cacheKey = new w.URL('./core.js?v=' + VER, w.location.href).href;
+    var swDiag = '';
+    for (var shi = 0; shi < 80; shi++) {   // 새로 설치한 SW가 캐시를 채울 때까지 (최대 20초)
+      try { shellHit = !!(await w.caches.match(cacheKey)); } catch (e) { swDiag = 'match:' + e; }
+      if (shellHit) break;
+      try {
+        var reg2 = await w.navigator.serviceWorker.getRegistration();
+        swDiag = 'sw:' + (reg2 ? (reg2.active ? 'active' : reg2.installing ? 'installing' : reg2.waiting ? 'waiting' : '?') : 'none') +
+          ' caches:' + (await w.caches.keys()).join(',');
+      } catch (e3) { swDiag = 'diag:' + e3; }
+      await sleep(250);
+    }
+    ok(shellHit, 'core.js가 캐시에 있음', swDiag);
+    w.dispatchEvent(new w.Event('offline'));
+    await sleep(180);
+    ok(text('.topbar .sub').indexOf('오프라인') >= 0, '오프라인 배지', text('.topbar .sub'));
+    w.dispatchEvent(new w.Event('online'));
+    await sleep(180);
+    ok(text('.topbar .sub').indexOf('오프라인') < 0, '온라인 복귀 배지', text('.topbar .sub'));
+
+    /* ---------------------------------------------- 5) 기간 변경 → Day 증감 */
+    var day4Item = null;
+    await clickSel('[data-tab="schedule"]');
+    await click(q('.chip[data-day="d4"]'));
+    await click(q('.fab'));
+    setv('#f_title', '공항 이동');
+    setv('#f_time', '1600');
+    await clickSel('[data-action="save-schedule"]');
+    ok(qa('.tl-item').length >= 1 && text('.tl').indexOf('공항 이동') >= 0, '마지막 날 일정 추가', qa('.tl-item').length);
+    await clickSel('[data-action="edit-trip"]');
+    await clickSel('[data-action="cal-toggle"]');
+    await pickDate('2026-12-05');
+    await pickDate('2026-12-06');
+    ok(text('#range-sub').indexOf('1박 2일') >= 0, '기간을 1박 2일로', text('#range-sub'));
+    await clickSel('[data-action="save-edit-trip"]');
+    ok(qa('.chips .chip').length === 3, 'Day 탭 3개로 줄어듦', qa('.chips .chip').length);
+    trip = S.trip(trip.id);
+    var moved = trip.data.schedules.filter(function (s) { return s.title === '공항 이동'; })[0];
+    ok(!!moved && moved.dayKey === 'd2', '사라진 날 일정은 마지막 날로 이동', moved && moved.dayKey);
+    ok(text('.empty h3').indexOf('사전준비') < 0, '없어진 Day가 아니라 실제 날짜를 보여줌', text('.empty h3'));
+    var activeDay = qa('.chip.active')[0].getAttribute('data-day');
+    ok(activeDay === 'd1' || activeDay === 'd2', '없어진 Day 대신 실제 날짜 탭', activeDay);
+
+    /* ------------------------------------------------------- 6) 체크리스트 */
+    await clickSel('[data-tab="check"]');
+    ok(!!q('#chk-new'), '준비물 입력 있음');
+    setv('#chk-new', '여권');
+    var whoSel = q('#chk-who');
+    if (whoSel) setv('#chk-who', trip.members[0].id);
+    await clickSel('[data-action="add-check"]');
+    ok(qa('.chk').length === 1, '준비물 추가', qa('.chk').length);
+    await click(q('.chk .box'));
+    ok(q('.chk').className.indexOf('done') >= 0, '준비물 체크');
+    await click(q('.chk-main'));
+    ok(!!q('#f_who'), '준비물 수정 시트');
+    setv('#f_who', trip.members[1].id);
+    await clickSel('[data-action="save-check"]');
+    ok(S.trip(trip.id).data.checklist[0].assigneeId === trip.members[1].id, '담당자 지정');
+    await click(q('.chk .icon-btn'));
+    ok(qa('.chk').length === 0, '준비물 삭제', qa('.chk').length);
+    noOverflow('체크리스트');
+
+    /* -------------------------------------------------- 7) JSON 백업·복원 */
+    await clickSel('[data-action="go-home"]');
+    await clickSel('[data-action="open-settings"]');
+    var backup = S.exportJSON();
+    ok(backup.indexOf('모바일 테스트 여행') > 0, '내보낼 백업에 여행 포함');
+    ok(!!q('#json-file') && !!q('label[for="json-file"]'), '복원용 파일 입력·라벨');
+    // v19: 기본 프로젝트가 이미 연결된 상태로 보인다 (빈 설정 칸이 아니다)
+    ok(text('.sheet-body').indexOf('triplog-c4921') >= 0, '설정: 기본 프로젝트 표시', text('.sheet-body').slice(0, 60));
+    ok(text('.sheet-body').indexOf('기본 내장') >= 0, '설정: 연결 방식 기본 내장');
+    ok(qa('[data-action="reset-fb"]').length === 0, '설정: 기본 상태에는 되돌리기 없음');
+    ok(!!q('[data-action="test-fb"]'), '설정: 연결 테스트 버튼');
+    var fbCfg = S.firebaseConfig();
+    ok(fbCfg && fbCfg.projectId === 'triplog-c4921' && S.isDefaultFirebase(), '기본 firebaseConfig 자동 적용', fbCfg && fbCfg.projectId);
+    ok(!!q('#f_fb') && q('#f_fb').value.indexOf('AIzaSyB2l8IQ6IFb') >= 0, '설정: firebaseConfig 칸에 현재 설정 표시');
+    noOverflow('설정 시트(기본 연결)');
+    var input = q('#json-file');
+    var dt = new w.DataTransfer();
+    dt.items.add(new w.File([backup], 'backup.json', { type: 'application/json' }));
+    input.files = dt.files;
+    input.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await sleep(500);
+    ok(S.trips().length >= 3, '파일에서 JSON 복원', S.trips().length);
+    ok(S.trips().filter(function (t) { return t.name === '모바일 테스트 여행'; }).length >= 2, '복원된 여행이 목록에');
+    ok(/모바일 테스트 여행/.test(w.document.body.textContent), '복원 후 홈 렌더');
+    noOverflow('홈');
+
+    /* ============ 7b) v18: 게스트 → Google·이메일 로그인 (가짜 인증) ============ */
+    ok(!!q('.auth-btn'), '게스트: 헤더에 로그인 버튼');
+    ok(!q('.acct-chip'), '게스트: 계정 칩 없음');
+    ok(text('.home-note, .body').indexOf('로그인하면 다른 기기에서도') >= 0, '게스트: 로그인 안내 문구');
+    await clickSel('[data-action="open-account"]');
+    ok(text('.sheet-body').indexOf('내 여행 목록이 계정에 저장') >= 0, '계정 시트 안내');
+    ok(!!q('[data-action="auth-google"]') && !!q('#auth_email'), '기본 프로젝트로 바로 로그인 화면');
+    ok(text('.sheet-body').indexOf('Firebase 설정 열기') < 0, '기본 설정이 내장되어 설정 안내 없음');
+    noOverflow('계정 시트(게스트)');
+    await clickSel('[data-action="close-modal"]');
+
+    // 초대코드가 있는 여행을 하나 만들어 둔다 (로그인 전 → 자동 공유 방을 만들지 않는다)
+    var acctTrip = S.createTrip({ name: '계정 동기화 여행', startDate: '2026-12-12', endDate: '2026-12-13' });
+    S.testInjectConn(acctTrip.id, 'QA1234', true);
+    await sleep(80);
+
+    // Firebase 설정이 있는 화면 (실제 로그인은 가짜 인증으로)
+    w.TL.Store.setFirebase({ apiKey: 'qa-key', projectId: 'qa-project', appId: 'qa-app' });
+    await clickSel('[data-action="open-settings"]');
+    ok(text('.sheet-body').indexOf('qa-project') >= 0 && text('.sheet-body').indexOf('내 설정') >= 0, '설정: 내 Firebase 설정 표시');
+    ok(!!q('[data-action="reset-fb"]'), '설정: 기본값으로 되돌리기 버튼');
+    noOverflow('설정 시트(내 설정)');
+    await clickSel('[data-action="reset-fb"]');
+    await sleep(150);
+    ok(S.isDefaultFirebase() && S.firebaseConfig().projectId === 'triplog-c4921', '되돌리기 → 기본 프로젝트', S.firebaseConfig().projectId);
+    ok(text('.sheet-body').indexOf('기본 내장') >= 0, '되돌린 뒤 설정 시트 갱신');
+    await clickSel('[data-action="close-modal"]');
+
+    w.TL.Store.setFirebase({ apiKey: 'qa-key', projectId: 'qa-project', appId: 'qa-app' });
+    await clickSel('[data-action="open-account"]');
+    ok(!!q('[data-action="auth-google"]'), '구글 로그인 버튼');
+    ok(!!q('#auth_email') && !!q('#auth_pw'), '이메일 로그인 입력');
+    ok(text('.sheet-body').indexOf('taijichoi.github.io') >= 0, '승인된 도메인 안내');
+    await clickSel('[data-action="auth-email"]');
+    ok(text('#auth-msg').indexOf('이메일 주소') >= 0, '빈 이메일 검증', text('#auth-msg'));
+    setv('#auth_email', 'qa@example.com');
+    setv('#auth_pw', '123');
+    await clickSel('[data-action="auth-signup"]');
+    ok(text('#auth-msg').indexOf('6자 이상') >= 0, '짧은 비밀번호 검증', text('#auth-msg'));
+    noOverflow('계정 시트(이메일)');
+
+    // 가짜 인증 공급자 + 가짜 계정 저장소 (실제 Firebase 호출 없이 흐름만)
+    w.eval([
+      'globalThis.__qaIOState = { docs:{}, writes:[], subs:[], unsubs:0, list:[], cb:null };',
+      'globalThis.__qaIO = {',
+      '  writeDoc: function (p, d) { var k = p.join("/"); __qaIOState.docs[k] = Object.assign({}, __qaIOState.docs[k] || {}, d); __qaIOState.writes.push(k); return Promise.resolve(true); },',
+      '  deleteDoc: function (p) { delete __qaIOState.docs[p.join("/")]; return Promise.resolve(true); },',
+      '  subscribeColl: function (p, cb) { __qaIOState.subs.push(p.join("/")); __qaIOState.cb = cb; cb(__qaIOState.list); return function () { __qaIOState.unsubs++; }; }',
+      '};',
+      'TL.Account.testSetIO(__qaIO);',
+      'TL.Auth.setProvider({',
+      '  google: function () { TL.Auth.testSignIn({ uid:"qa1", displayName:"테스트 재원", email:"qa@example.com" }); return Promise.resolve({ method:"popup" }); },',
+      '  emailSignIn: function (e, p) { TL.Auth.testSignIn({ uid:"qa1", displayName:"테스트 재원", email:e }); return Promise.resolve(TL.Auth.currentUser()); },',
+      '  emailSignUp: function (e, p, n) { TL.Auth.testSignIn({ uid:"qa1", displayName:n, email:e }); return Promise.resolve(TL.Auth.currentUser()); },',
+      '  resetPassword: function () { return Promise.resolve(true); },',
+      '  signOut: function () { TL.Auth.testSignOut(); return Promise.resolve(true); }',
+      '});'
+    ].join('\n'));
+
+    setv('#auth_email', 'qa@example.com');
+    setv('#auth_pw', 'secret1');
+    await clickSel('[data-action="auth-email"]');
+    await sleep(500);
+    ok(w.TL.Auth.signedIn(), '이메일 로그인 성공(가짜 인증)');
+    ok(!q('.modal'), '로그인 뒤 시트 닫힘');
+    ok(!!q('.acct-chip') && text('.acct-chip').indexOf('테스트 재원') >= 0, '헤더에 계정 이름 칩', text('.acct-chip'));
+    ok(text('.hello h1').indexOf('테스트 재원') >= 0, '홈 인사말에 계정 이름', text('.hello h1'));
+    ok(w.TL.Store.settings().nickname === '테스트 재원', '계정 이름이 내 이름 기본값', w.TL.Store.settings().nickname);
+    ok(w.eval("(__qaIOState.writes||[]).indexOf('users/qa1') >= 0"), '계정 프로필 저장');
+    noOverflow('로그인 뒤 홈');
+
+    // 계정 여행 목록 등록
+    await w.eval('TL.Account.sync()');
+    await sleep(200);
+    ok(w.eval("!!__qaIOState.docs['users/qa1/trips/QA1234']"), '원격 여행을 계정에 등록');
+    ok(w.eval("(__qaIOState.docs['users/qa1/trips/QA1234']||{}).role") === 'member', '계정 문서에 역할 기록', w.eval("(__qaIOState.docs['users/qa1/trips/QA1234']||{}).role"));
+
+    // 로그인 직후 병합 안내 (이 기기에만 있는 여행)
+    var mergeShown = false;
+    for (var mq = 0; mq < 20; mq++) {
+      if (q('[data-action="acct-merge"]')) { mergeShown = true; break; }
+      await sleep(150);
+    }
+    ok(mergeShown, '로그인 뒤 로컬 여행 병합 안내');
+    if (mergeShown) {
+      ok(text('.sheet-body').indexOf('계정 동기화 여행') < 0, '이미 원격인 여행은 병합 목록에 없음');
+      noOverflow('병합 시트');
+      await clickSel('[data-action="close-modal"]');
+    }
+
+    // 계정 시트 (로그인 상태)
+    await click(q('.acct-chip'));
+    ok(text('.sheet-body').indexOf('계정에 저장된 여행') >= 0, '계정 시트: 저장 현황');
+    ok(!!q('[data-action="auth-sync"]') && !!q('[data-action="auth-signout"]'), '계정 시트: 동기화·로그아웃');
+    noOverflow('계정 시트(로그인)');
+
+    // Firebase Auth 모듈(10.12.2)이 실제로 있는지 확인
+    var authMod = null;
+    try { authMod = await w.eval("import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js')"); } catch (e) { authMod = null; }
+    ok(!!authMod && ['getAuth', 'GoogleAuthProvider', 'signInWithPopup', 'signInWithRedirect', 'getRedirectResult',
+      'signInWithEmailAndPassword', 'createUserWithEmailAndPassword', 'signOut', 'onAuthStateChanged']
+      .every(function (k) { return typeof authMod[k] === 'function'; }), 'Firebase Auth 모듈 함수 확인', authMod ? 'v10.12.2' : '불러오지 못함');
+
+    // 로그아웃 → 게스트 복귀
+    await clickSel('[data-action="auth-signout"]');
+    await sleep(400);
+    ok(!w.TL.Auth.signedIn(), '로그아웃됨');
+    ok(!!q('.auth-btn') && !q('.acct-chip'), '로그아웃 뒤 게스트 헤더');
+    ok(S.trips().length >= 3 && !!S.trip(acctTrip.id), '로그아웃 뒤에도 여행 유지', S.trips().length);
+    ok(text('#toast').indexOf('로그아웃') >= 0, '로그아웃 안내 토스트', text('#toast'));
+    ok(w.eval('__qaIOState.unsubs') >= 1, '로그아웃: 계정 구독 해지');
+    noOverflow('로그아웃 뒤 홈');
+
+    // 실제 네트워크를 타지 않도록 정리
+    w.TL.Store.setFirebase(null);
+    w.TL.Auth.setProvider(null);
+    w.TL.Account.testSetIO(null);
+
+    // v19: 기본 내장 설정(triplog-c4921)으로 실제 Firestore에 붙는지 읽기 1회로 확인
+    var fbProbe = 'skip';
+    try {
+      fbProbe = await w.eval('TL.Store.testFirebase(TL.Store.firebaseConfig()).then(function(){return "ok";},function(e){return "fail:" + ((e && (e.code || e.message)) || e);})');
+    } catch (e) { fbProbe = 'ex:' + (e && e.message); }
+    ok(fbProbe === 'ok', '기본 Firebase 프로젝트 실제 연결(triplog-c4921)', fbProbe);
+    ok(S.isDefaultFirebase(), '연결 테스트 뒤에도 기본 설정 유지');
+
+    /* --------------------------------------------- 8) 초대 링크 진입 흐름 */
+    var inv = document.getElementById('invite');
+    inv.src = '../index.html?qa=invite&t=' + Date.now() + '&trip=7KD2QM';
+    var idoc = null, inviteOk = false;
+    for (var iv = 0; iv < 100; iv++) {
+      await sleep(150);
+      idoc = inv.contentDocument;
+      if (idoc && idoc.querySelector('#f_code')) { inviteOk = true; break; }
+    }
+    ok(inviteOk, '초대 링크로 들어오면 참여 시트');
+    var iw = inv.contentWindow;
+    ok(!!iw && !!iw.TL && iw.TL.Store.isDefaultFirebase(), '초대 링크도 기본 설정으로 열림');
+    ok(idoc && idoc.querySelector('#f_code') && idoc.querySelector('#f_code').value === '7KD2QM', '초대 코드 자동 입력', idoc && idoc.querySelector('#f_code') && idoc.querySelector('#f_code').value);
+
+    /* ------------------------------------------------------- 9) 로드·오류 */
+    var res = w.performance.getEntriesByType('resource').filter(function (r) { return /\.(js|css)(\?|$)/.test(r.name); });
+    var bad = res.filter(function (r) { return r.responseStatus && r.responseStatus !== 200; });
+    ok(res.length >= 9, 'JS/CSS 리소스 로드 수', res.length);
+    ok(bad.length === 0, 'JS/CSS 200 OK', bad.map(function (b) { return b.responseStatus + ' ' + b.name; }).join(', '));
+    ok(errs.length === 0, '콘솔 오류 0건', errs.slice(0, 5).join(' | '));
+
+    finish();
+  }
+
+  function finish() {
+    var summary = pass + ' passed, ' + fails.length + ' failed';
+    lines.push('---- ' + summary + ' ----');
+    out.textContent = lines.join('\n');
+    window.__QA = { pass: pass, fails: fails, lines: lines, done: true, summary: summary };
+    document.title = 'QA ' + summary;
+  }
+
+  run().catch(function (e) {
+    fails.push('예외: ' + (e && e.stack || e));
+    log('HEAD', '예외: ' + (e && e.message));
+    finish();
+  });
+})();
+</script>
+</body>
+</html>
