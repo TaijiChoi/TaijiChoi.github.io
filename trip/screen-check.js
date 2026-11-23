@@ -40,7 +40,7 @@
     if (!items.length) {
       html += '<div class="empty" style="margin-top:14px">' +
         '<div class="emo">🎒</div><h3>준비물을 챙겨볼까요</h3>' +
-        '<p>여행 준비물 기본 목록을 불러오면 바로 시작할 수 있어요.</p>' +
+        '<p>기본 목록을 불러오거나, 아래에 직접 적어서 하나씩 체크해 보세요.</p>' +
         '<div class="btn-row"><button class="btn btn-mint" data-action="load-template">' + UI.icon('sparkle') + '기본 준비물 불러오기</button></div>' +
       '</div>';
     } else {
@@ -55,19 +55,20 @@
           '<button class="icon-btn sm" data-action="del-check" data-id="' + UI.esc(it.id) + '" aria-label="삭제">' + UI.icon('trash', 16) + '</button>' +
         '</div>';
       }).join('') + '</div>';
-
-      html += '<div class="card pad mt12">' +
-        '<div class="tiny" style="font-weight:750;margin-bottom:8px">항목 추가</div>' +
-        '<div class="inline-add" style="margin-top:0">' +
-          '<input class="input" id="chk-new" placeholder="예: 돼지코 어댑터" maxlength="60">' +
-          (members.length ? '<select class="input" id="chk-who" style="width:96px;flex:none">' +
-            '<option value="">담당</option>' +
-            members.map(function (m) { return '<option value="' + UI.esc(m.id) + '">' + UI.esc(m.name) + '</option>'; }).join('') +
-            '</select>' : '') +
-          '<button class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="add-check">추가</button>' +
-        '</div>' +
-      '</div>';
     }
+
+    // 항목이 없을 때도 직접 추가할 수 있게 입력줄은 늘 보여준다
+    html += '<div class="card pad mt12">' +
+      '<div class="tiny" style="font-weight:750;margin-bottom:8px">항목 추가</div>' +
+      '<div class="inline-add" style="margin-top:0">' +
+        '<input class="input" id="chk-new" placeholder="예: 돼지코 어댑터" maxlength="60" autocomplete="off">' +
+        (members.length ? '<select class="input" id="chk-who" style="width:96px;flex:none">' +
+          '<option value="">담당</option>' +
+          members.map(function (m) { return '<option value="' + UI.esc(m.id) + '">' + UI.esc(m.name) + '</option>'; }).join('') +
+          '</select>' : '') +
+        '<button class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="add-check">추가</button>' +
+      '</div>' +
+    '</div>';
 
     if (items.length) {
       html += '<div class="row" style="gap:8px;margin-top:12px">' +
