@@ -102,6 +102,12 @@
     if (!screenEl) return;
     var trip = v.tripId ? Store.trip(v.tripId) : null;
     if (v.screen === 'trip' && !trip) { v.screen = 'home'; v.tripId = null; }
+    if (v.screen === 'trip' && trip) {
+      // 기간이 바뀌어 없어진 Day를 가리키고 있으면 초기화한다
+      var dayKeys = Core.dayList(trip).map(function (d) { return d.key; });
+      if (v.day && dayKeys.indexOf(v.day) < 0) v.day = '';
+      if (v.mDay !== 'all' && dayKeys.indexOf(v.mDay) < 0) v.mDay = 'all';
+    }
 
     var html = '';
     if (v.screen === 'home') {
