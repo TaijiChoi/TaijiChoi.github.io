@@ -479,10 +479,10 @@
 
     /* ============ 4e) v15: 서비스 워커 · 오프라인 배지 ============ */
     var reg = null;
-    for (var rgi = 0; rgi < 20; rgi++) {
+    for (var rgi = 0; rgi < 80; rgi++) {   // 부팅 때 Firebase 모듈 로드와 겹쳐도 등록될 때까지 (최대 20초)
       try { reg = await w.navigator.serviceWorker.getRegistration(); } catch (e) {}
       if (reg) break;
-      await sleep(200);
+      await sleep(250);
     }
     ok(!!reg, '서비스 워커 등록', reg && reg.scope);
     var cacheKeys = [];

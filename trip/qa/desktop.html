@@ -240,7 +240,11 @@
 
     /* 서비스 워커 */
     var reg = null;
-    try { reg = await w.navigator.serviceWorker.getRegistration(); } catch (e) {}
+    for (var rgi = 0; rgi < 80; rgi++) {
+      try { reg = await w.navigator.serviceWorker.getRegistration(); } catch (e) {}
+      if (reg) break;
+      await sleep(250);
+    }
     ok(!!reg, '서비스 워커 등록(데스크톱)', reg && reg.scope);
 
     ok(doc.documentElement.scrollWidth <= 1280 + 1, '마지막 가로 스크롤 없음', doc.documentElement.scrollWidth);
