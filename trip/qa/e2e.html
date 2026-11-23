@@ -120,14 +120,22 @@
     // 초기 상태: 이 브라우저 프로필의 이 사이트 테스트 데이터만 비운다
     w.localStorage.clear();
     // 첫 방문자와 같은 상태로: 기존 SW 등록을 풀고 앱 셸 캐시를 비운다 → 새 SW가 설치하며 프리캐시한다
-    try {
-      var regs = await w.navigator.serviceWorker.getRegistrations();
-      for (var ri = 0; ri < regs.length; ri++) { try { await regs[ri].unregister(); } catch (e2) {} }
-    } catch (e) {}
+    var swClean = false;
+    for (var uq = 0; uq < 25; uq++) {
+      var regs0 = [];
+      try { regs0 = await w.navigator.serviceWorker.getRegistrations(); } catch (e) {}
+      if (!regs0.length) { swClean = true; break; }
+      for (var ri = 0; ri < regs0.length; ri++) { try { await regs0[ri].unregister(); } catch (e2) {} }
+      await sleep(200);
+    }
+    log('INFO', 'SW 정리 ' + (swClean ? '완료(등록 0)' : '실패(등록 남음)'));
     try {
       var ks = await w.caches.keys();
       await Promise.all(ks.map(function (k) { return caches.delete(k); }));
     } catch (e) {}
+    var cachesAfter = [];
+    try { cachesAfter = await w.caches.keys(); } catch (e) {}
+    log('INFO', '캐시 정리 ' + (cachesAfter.length ? '실패:' + cachesAfter.join(',') : '완료(0)'));
     await new Promise(function (res) {
       var done = false;
       function on() { if (done) return; done = true; f.removeEventListener('load', on); res(); }
@@ -504,6 +512,9 @@
       await sleep(250);
     }
     ok(shellHit, 'core.js가 캐시에 있음', swDiag);
+    var cacheList = [];
+    try { cacheList = (await (await w.caches.open('triplog-v' + VER)).keys()).map(function (r) { return r.url.split('/').pop(); }); } catch (e) {}
+    ok(cacheList.length >= 15, '앱 셸 파일 캐시 수', cacheList.length + '개');
     w.dispatchEvent(new w.Event('offline'));
     await sleep(180);
     ok(text('.topbar .sub').indexOf('오프라인') >= 0, '오프라인 배지', text('.topbar .sub'));
