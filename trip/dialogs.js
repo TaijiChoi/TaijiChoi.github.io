@@ -406,6 +406,48 @@
     var trip = TL.App.currentTrip();
     Store.remove(trip.id, 'checklist', el.getAttribute('data-id'));
   };
+
+  /* 준비물 수정 시트 */
+  D.checkItem = function (trip, id) {
+    var item = null;
+    ((trip.data && trip.data.checklist) || []).forEach(function (i) { if (i.id === id) item = i; });
+    if (!item) return;
+    dlg = { kind: 'check', id: id, trip: trip };
+    D.trip = trip;
+    var members = trip.members || [];
+    var html = '<div class="form-row"><label class="fl">준비물</label>' +
+      '<input class="input" id="f_text" maxlength="60" value="' + UI.esc(item.text) + '"></div>' +
+      '<div class="form-row"><label class="fl">담당자</label><select class="input" id="f_who">' +
+      '<option value=""' + (!item.assigneeId ? ' selected' : '') + '>지정 안 함</option>' +
+      members.map(function (m) {
+        return '<option value="' + UI.esc(m.id) + '"' + (m.id === item.assigneeId ? ' selected' : '') + '>' + UI.esc(m.name) + '</option>';
+      }).join('') + '</select></div>' +
+      '<div class="sheet-foot">' +
+      '<button class="btn btn-danger" data-action="del-check-edit">삭제</button>' +
+      '<button class="btn btn-primary" data-action="save-check">저장</button></div>';
+    open(html, '준비물 수정');
+  };
+
+  A['edit-check'] = function (el) {
+    var trip = TL.App.currentTrip();
+    if (trip) D.checkItem(trip, el.getAttribute('data-id'));
+  };
+  A['save-check'] = function () {
+    var trip = tripOf() || TL.App.currentTrip();
+    if (!trip || !dlg.id) return;
+    var text = UI.val('f_text').trim();
+    if (!text) { UI.toast('준비물을 입력해 주세요'); return; }
+    Store.update(trip.id, 'checklist', dlg.id, { text: text, assigneeId: UI.val('f_who') || '' });
+    UI.close();
+    UI.toast('저장했어요');
+  };
+  A['del-check-edit'] = function () {
+    var trip = tripOf() || TL.App.currentTrip();
+    if (!trip || !dlg.id) return;
+    if (!confirm('이 준비물을 삭제할까요?')) return;
+    Store.remove(trip.id, 'checklist', dlg.id);
+    UI.close();
+  };
   A['load-template'] = function () {
     var trip = TL.App.currentTrip();
     if (!trip) return;
@@ -566,7 +608,7 @@
       html += '<div class="code-box light" id="rules">' + UI.esc(D.RULES) + '</div>' +
         '<button class="btn btn-ghost sm mt8" data-action="copy-rules" style="width:100%">규칙 복사</button>';
       html += '<div class="form-row mt12"><label class="fl">firebaseConfig 붙여넣기</label>' +
-        '<textarea class="input" id="f_fb" placeholder=\'{\n  "apiKey": "...",\n  "authDomain": "...",\n  "projectId": "...",\n  "appId": "..."\n}\' style="min-height:116px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px"></textarea>' +
+        '<textarea class="input" id="f_fb" placeholder="여기에 firebaseConfig를 붙여넣으세요" style="min-height:116px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px"></textarea>' +
         '<div class="hintline">따옴표·중괄호까지 그대로 붙여넣으면 됩니다. (또는 apiKey / projectId / appId 세 줄만 입력)</div>' +
         '<button class="btn btn-mint mt8" data-action="save-fb">저장하고 연결 테스트</button></div>';
     } else {
