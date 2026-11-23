@@ -8,8 +8,11 @@
   S.money = function (trip, view) {
     var data = trip.data;
     var t = Core.totals(trip, data);
+    var dayKeys = Core.dayList(trip).map(function (d) { return d.key; });
     var dayFilter = view.mDay || 'all';
+    if (dayFilter !== 'all' && dayKeys.indexOf(dayFilter) < 0) dayFilter = 'all';
     var catFilter = view.mCat || 'all';
+    if (catFilter !== 'all' && !Core.EXP_CATS.some(function (c) { return c.key === catFilter; })) catFilter = 'all';
     var html = '<div class="body">';
 
     /* ---- 요약 카드 */

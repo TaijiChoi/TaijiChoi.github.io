@@ -29,6 +29,7 @@
       nickname: '',
       firebase: null,
       defaultRates: Object.assign({}, Core.DEFAULT_RATES),
+      meByTrip: {},
       seenWelcome: false
     };
   }
@@ -41,6 +42,7 @@
       var parsed = JSON.parse(raw);
       var s = Object.assign(blank(), parsed || {});
       if (!Array.isArray(s.trips)) s.trips = [];
+      if (!s.meByTrip || typeof s.meByTrip !== 'object' || Array.isArray(s.meByTrip)) s.meByTrip = {};
       s.trips.forEach(function (t) {
         if (!t.data) t.data = {};
         COLLS.forEach(function (c) { if (!Array.isArray(t.data[c])) t.data[c] = []; });
@@ -197,13 +199,60 @@
     for (var i = 0; i < ms.length; i++) if (ms[i].id === id) return ms[i].name;
     return '';
   };
+  /** 이 기기에서 '나'로 지정한 일행 id. 없으면 닉네임 → 첫 일행 순으로 찾는다. */
   Store.meId = function (trip, fallback) {
     if (!trip) return fallback || '';
+    var ms = trip.members || [];
+    var saved = state.meByTrip && state.meByTrip[trip.id];
+    if (saved && ms.some(function (m) { return m.id === saved; })) return saved;
     var nick = state.nickname;
     if (nick) {
-      for (var i = 0; i < trip.members.length; i++) if (trip.members[i].name === nick) return trip.members[i].id;
+      for (var i = 0; i < ms.length; i++) if (ms[i].name === nick) return ms[i].id;
     }
-    return fallback || (trip.members[0] && trip.members[0].id) || '';
+    return fallback || (ms[0] && ms[0].id) || '';
+  };
+  /** 정산·결제자 기본값에 쓸 '나'를 일행 중에서 지정한다. */
+  Store.setMeMember = function (tripId, memberId) {
+    var trip = Store.trip(tripId);
+    if (!trip) return;
+    if (!state.meByTrip) state.meByTrip = {};
+    if (memberId && !(trip.members || []).some(function (m) { return m.id === memberId; })) return;
+    if (memberId) state.meByTrip[tripId] = memberId;
+    else delete state.meByTrip[tripId];
+    notify();
+  };
+  Store.myMember = function (trip) {
+    var id = Store.meId(trip, null);
+    for (var i = 0; trip && i < (trip.members || []).length; i++) if (trip.members[i].id === id) return trip.members[i];
+    return null;
+  };
+  Store.memberStats = function (trip, memberId) {
+    var paidCount = 0, paidSum = 0, spent = 0;
+    ((trip && trip.data && trip.data.expenses) || []).forEach(function (e) {
+      if (e.payerId === memberId) { paidCount++; paidSum += Core.expenseKRW(e, trip); }
+      if (Array.isArray(e.sharedWith) && e.sharedWith.indexOf(memberId) >= 0) spent++;
+    });
+    var checks = ((trip && trip.data && trip.data.checklist) || []).filter(function (c) { return c.assigneeId === memberId; }).length;
+    return { paidCount: paidCount, paidSum: paidSum, spentCount: spent, checkCount: checks };
+  };
+  Store.renameMember = function (tripId, memberId, newName) {
+    var trip = Store.trip(tripId);
+    if (!trip) return { ok: false, error: '여행을 찾을 수 없어요' };
+    var name = String(newName == null ? '' : newName).trim();
+    if (!name) return { ok: false, error: '이름을 입력해 주세요' };
+    if (name.length > 12) return { ok: false, error: '이름은 12자까지 쓸 수 있어요' };
+    var target = null;
+    (trip.members || []).forEach(function (m) { if (m.id === memberId) target = m; });
+    if (!target) return { ok: false, error: '일행을 찾을 수 없어요' };
+    if (trip.members.some(function (m) { return m.id !== memberId && m.name === name; })) {
+      return { ok: false, error: '이미 같은 이름의 일행이 있어요' };
+    }
+    var old = target.name;
+    target.name = name;
+    if (state.nickname === old) state.nickname = name;
+    if (trip.remoteCode && conn && conn.code === trip.remoteCode) remoteWrite(trip, metaDoc(trip), metaPayload(trip));
+    notify();
+    return { ok: true, name: name };
   };
   Store.addMember = function (tripId, name) {
     var trip = Store.trip(tripId);
@@ -219,14 +268,82 @@
   };
   Store.removeMember = function (tripId, memberId) {
     var trip = Store.trip(tripId);
-    if (!trip) return;
+    if (!trip) return { ok: false, error: '여행을 찾을 수 없어요' };
+    if ((trip.members || []).length <= 1) return { ok: false, error: '최소 한 명은 남겨야 해요' };
+    var removed = trip.members.filter(function (m) { return m.id === memberId; })[0];
+    if (!removed) return { ok: false, error: '일행을 찾을 수 없어요' };
     trip.members = trip.members.filter(function (m) { return m.id !== memberId; });
-    trip.data.expenses.forEach(function (e) {
-      if (e.payerId === memberId) e.payerId = trip.members[0] ? trip.members[0].id : '';
-      if (e.sharedWith) e.sharedWith = e.sharedWith.filter(function (id) { return id !== memberId; });
+    var nextPay = trip.members[0] ? trip.members[0].id : '';
+    var moved = 0;
+    var touched = [];
+    (trip.data.expenses || []).forEach(function (e) {
+      var dirty = false;
+      if (e.payerId === memberId) { e.payerId = nextPay; moved++; dirty = true; }
+      if (Array.isArray(e.sharedWith) && e.sharedWith.indexOf(memberId) >= 0) {
+        e.sharedWith = e.sharedWith.filter(function (id) { return id !== memberId; });
+        dirty = true;
+      }
+      if (dirty) touched.push(e);
     });
+    (trip.data.checklist || []).forEach(function (c) { if (c.assigneeId === memberId) c.assigneeId = ''; });
+    if (state.meByTrip && state.meByTrip[tripId] === memberId) delete state.meByTrip[tripId];
+    if (trip.remoteCode) {
+      touched.forEach(function (e) { remoteWrite(trip, [trip.remoteCode, 'expenses', e.id], stripId(e)); });
+    }
+    if (removed.name && state.nickname === removed.name) state.nickname = '';
     if (trip.remoteCode && conn && conn.code === trip.remoteCode) remoteWrite(trip, metaDoc(trip), metaPayload(trip));
     notify();
+    return { ok: true, name: removed.name, moved: moved };
+  };
+  /** 여행 기간이 줄어 사라진 Day의 일정·지출을 마지막 날로 옮긴다 */
+  Store.fitDaysToTrip = function (tripId) {
+    var trip = Store.trip(tripId);
+    if (!trip) return 0;
+    var max = Core.tripDayCount(trip);
+    var moved = 0;
+    var lists = [['schedules', 'dayKey'], ['expenses', 'dayKey']];
+    lists.forEach(function (pair) {
+      var coll = pair[0];
+      (trip.data[coll] || []).forEach(function (it) {
+        var m = /^d(\d+)$/.exec(String(it.dayKey || ''));
+        if (!m) return;
+        if (Number(m[1]) > max) {
+          it.dayKey = 'd' + max;
+          moved++;
+          if (trip.remoteCode) remoteWrite(trip, [trip.remoteCode, coll, it.id], stripId(it));
+        }
+      });
+    });
+    if (moved) { Store.normalizeOrders(tripId); notify(); }
+    return moved;
+  };
+  /** 같은 날 안의 order를 0..n-1로 정리한다 */
+  Store.normalizeOrders = function (tripId) {
+    var trip = Store.trip(tripId);
+    if (!trip) return;
+    var changed = [];
+    var days = Core.dayList(trip).map(function (d) { return d.key; });
+    days.forEach(function (day) {
+      var group = Core.sortedSchedules(trip.data, day);
+      group.forEach(function (it, i) {
+        if (it.order !== i) { it.order = i; changed.push(it); }
+      });
+    });
+    (trip.data.schedules || []).forEach(function (it) {
+      if (days.indexOf(it.dayKey) < 0) it.dayKey = 'd' + Core.tripDayCount(trip);
+    });
+    var checks = (trip.data.checklist || []).slice().sort(function (a, b) {
+      var oa = isFinite(a.order) ? a.order : 0, ob = isFinite(b.order) ? b.order : 0;
+      return oa - ob;
+    });
+    checks.forEach(function (it, i) { if (it.order !== i) { it.order = i; changed.push(it); } });
+    if (trip.remoteCode) {
+      changed.forEach(function (it) {
+        var coll = it.dayKey != null ? 'schedules' : 'checklist';
+        if (it.text != null) coll = 'checklist';
+        remoteWrite(trip, [trip.remoteCode, coll, it.id], stripId(it));
+      });
+    }
   };
 
   /* ------------------------------------------------------------ 항목 CRUD */
@@ -254,7 +371,12 @@
     var list = collOf(trip, coll);
     for (var i = 0; i < list.length; i++) {
       if (list[i].id !== id) continue;
-      var next = Object.assign({}, list[i], patch);
+      var prev = list[i];
+      var next = Object.assign({}, prev, patch);
+      // 다른 날로 옮기면 그 날의 맨 뒤로 보낸다
+      if (coll === 'schedules' && patch.dayKey && patch.dayKey !== prev.dayKey) {
+        next.order = list.filter(function (x) { return x !== prev && x.dayKey === patch.dayKey; }).length;
+      }
       list[i] = next;
       if (trip.remoteCode) remoteWrite(trip, [trip.remoteCode, coll, id], stripId(next));
       notify();
@@ -265,8 +387,23 @@
   Store.remove = function (tripId, coll, id) {
     var trip = Store.trip(tripId);
     if (!trip) return;
+    var gone = collOf(trip, coll).filter(function (x) { return x.id === id; })[0];
     trip.data[coll] = collOf(trip, coll).filter(function (x) { return x.id !== id; });
     if (trip.remoteCode) remoteDelete(trip, [trip.remoteCode, coll, id]);
+    // 남은 항목의 순서를 다시 0..n-1로 맞춘다
+    if (coll === 'schedules' && gone) {
+      Core.sortedSchedules(trip.data, gone.dayKey).forEach(function (it, i) {
+        if (it.order !== i) {
+          it.order = i;
+          if (trip.remoteCode) remoteWrite(trip, [trip.remoteCode, coll, it.id], stripId(it));
+        }
+      });
+    }
+    if (coll === 'checklist') {
+      collOf(trip, coll).sort(function (a, b) {
+        return (isFinite(a.order) ? a.order : 0) - (isFinite(b.order) ? b.order : 0);
+      }).forEach(function (it, i) { it.order = i; });
+    }
     notify();
   };
   function stripId(it) {
@@ -285,16 +422,13 @@
     var idx = group.findIndex(function (s) { return s.id === id; });
     var swap = idx + (dir < 0 ? -1 : 1);
     if (idx < 0 || swap < 0 || swap >= group.length) return;
-    var a = group[idx], b = group[swap];
-    var ao = isFinite(a.order) ? a.order : idx;
-    var bo = isFinite(b.order) ? b.order : swap;
-    if (ao === bo) { ao = idx; bo = swap; }
-    var tmp = ao; ao = bo; bo = tmp;
-    a.order = ao; b.order = bo;
-    if (trip.remoteCode) {
-      remoteWrite(trip, [trip.remoteCode, 'schedules', a.id], stripId(a));
-      remoteWrite(trip, [trip.remoteCode, 'schedules', b.id], stripId(b));
-    }
+    group.splice(swap, 0, group.splice(idx, 1)[0]);
+    group.forEach(function (it, i) {
+      if (it.order !== i) {
+        it.order = i;
+        if (trip.remoteCode) remoteWrite(trip, [trip.remoteCode, 'schedules', it.id], stripId(it));
+      }
+    });
     notify();
   };
 
@@ -510,8 +644,7 @@
     state.currentTripId = trip.id;
     notify();
     return Store.connect(trip.id, { code: code }).then(function () {
-      // 내 닉네임을 일행에 자동 등록
-      if (state.nickname) Store.addMember(trip.id, state.nickname);
+      // 일행 목록에 내가 있는지는 사용자가 직접 고른다 (Dialogs.whoAmI)
       return trip;
     }).catch(function (e) {
       if (!existing) {
@@ -533,21 +666,138 @@
       trips: state.trips.map(function (t) { return Object.assign({}, t); })
     }, null, 2);
   };
+  /** 백업 파일의 여행 하나를 앱이 기대하는 모양으로 고친다 (깨진 값은 기본값으로) */
+  function sanitizeTrip(raw) {
+    var t = raw && typeof raw === 'object' ? raw : {};
+    var out = {
+      id: typeof t.id === 'string' && t.id ? t.id : Core.uid('trip'),
+      name: String(t.name || '가져온 여행').trim().slice(0, 60) || '가져온 여행',
+      destination: String(t.destination || '').trim().slice(0, 60),
+      startDate: Core.isISODate(t.startDate) ? t.startDate : Core.todayISO(),
+      endDate: Core.isISODate(t.endDate) ? t.endDate : '',
+      baseCurrency: /^[A-Z]{3}$/.test(String(t.baseCurrency || '')) ? t.baseCurrency : 'KRW',
+      createdAt: typeof t.createdAt === 'string' ? t.createdAt : new Date().toISOString(),
+      rates: {},
+      data: { schedules: [], expenses: [], checklist: [] }
+    };
+    if (!out.endDate) out.endDate = out.startDate;
+    var r = Core.rangeOrder(out.startDate, out.endDate);
+    out.startDate = r.start;
+    out.endDate = Core.diffDays(r.start, r.end) > 59 ? Core.addDays(r.start, 59) : r.end;
+
+    var memIds = {};
+    var names = {};
+    out.members = (Array.isArray(t.members) ? t.members : []).map(function (m) {
+      if (typeof m === 'string') m = { name: m };
+      if (!m || typeof m !== 'object') return null;
+      var name = String(m.name == null ? '' : m.name).trim().slice(0, 12);
+      if (!name) return null;
+      var id = typeof m.id === 'string' && m.id && !memIds[m.id] ? m.id : Core.uid('m');
+      memIds[id] = 1;
+      var base = name, n = 2;
+      while (names[name]) { name = (base.slice(0, 9) + ' ' + n).slice(0, 12); n++; }
+      names[name] = 1;
+      return { id: id, name: name };
+    }).filter(Boolean);
+    if (!out.members.length) out.members = [{ id: Core.uid('m'), name: '나' }];
+    memIds = {};
+    out.members.forEach(function (m) { memIds[m.id] = 1; });
+
+    if (t.rates && typeof t.rates === 'object') {
+      Object.keys(t.rates).forEach(function (k) {
+        if (!/^[A-Z]{3}$/.test(k)) return;
+        var v = Number(t.rates[k]);
+        if (isFinite(v) && v > 0) out.rates[k] = v;
+      });
+    }
+    var dayKeys = {};
+    Core.dayList(out).forEach(function (d) { dayKeys[d.key] = 1; });
+    var fallDay = dayKeys.d1 ? 'd1' : 'prep';
+    var src = t.data && typeof t.data === 'object' ? t.data : {};
+
+    var sched = Array.isArray(src.schedules) ? src.schedules : [];
+    out.data.schedules = sched.map(function (s, i) {
+      if (!s || typeof s !== 'object') return null;
+      var title = String(s.title == null ? '' : s.title).trim().slice(0, 60);
+      if (!title) return null;
+      var dayKey = dayKeys[s.dayKey] ? s.dayKey : fallDay;
+      return {
+        id: typeof s.id === 'string' && s.id ? s.id : Core.uid('s'),
+        dayKey: dayKey,
+        order: isFinite(s.order) ? Number(s.order) : i,
+        time: Core.normTime(s.time),
+        title: title,
+        category: Core.schedCat(s.category).key,
+        place: String(s.place || '').slice(0, 60),
+        memo: String(s.memo || '').slice(0, 300),
+        createdAt: typeof s.createdAt === 'string' ? s.createdAt : new Date().toISOString()
+      };
+    }).filter(Boolean);
+
+    var exps = Array.isArray(src.expenses) ? src.expenses : [];
+    out.data.expenses = exps.map(function (e, i) {
+      if (!e || typeof e !== 'object') return null;
+      var amount = Core.num(e.amount, 0);
+      if (!(amount > 0)) return null;
+      var cur = /^[A-Z]{3}$/.test(String(e.currency || '')) ? e.currency : 'KRW';
+      var rate = Number(e.rate);
+      if (!(rate > 0)) rate = cur === 'KRW' ? 1 : Core.rateOf(out.rates, cur);
+      var shared = (Array.isArray(e.sharedWith) ? e.sharedWith : []).filter(function (id) { return memIds[id]; });
+      return {
+        id: typeof e.id === 'string' && e.id ? e.id : Core.uid('e'),
+        dayKey: dayKeys[e.dayKey] ? e.dayKey : fallDay,
+        amount: amount,
+        currency: cur,
+        rate: rate,
+        category: Core.expCat(e.category).key,
+        title: String(e.title || '').trim().slice(0, 50) || Core.expCat(e.category).label,
+        payerId: memIds[e.payerId] ? e.payerId : '',
+        sharedWith: shared,
+        private: !!e.private,
+        memo: String(e.memo || '').slice(0, 100),
+        createdAt: typeof e.createdAt === 'string' ? e.createdAt : new Date().toISOString()
+      };
+    }).filter(Boolean);
+
+    var checks = Array.isArray(src.checklist) ? src.checklist : [];
+    out.data.checklist = checks.map(function (c, i) {
+      if (!c || typeof c !== 'object') return null;
+      var text = String(c.text == null ? '' : c.text).trim().slice(0, 60);
+      if (!text) return null;
+      return {
+        id: typeof c.id === 'string' && c.id ? c.id : Core.uid('c'),
+        order: isFinite(c.order) ? Number(c.order) : i,
+        text: text,
+        done: !!c.done,
+        assigneeId: memIds[c.assigneeId] ? c.assigneeId : '',
+        createdAt: typeof c.createdAt === 'string' ? c.createdAt : new Date().toISOString()
+      };
+    }).filter(Boolean);
+
+    if (t.sample) out.sample = true;
+    if (typeof t.remoteCode === 'string' && /^[A-Z0-9]{4,10}$/.test(t.remoteCode)) out.remoteCode = t.remoteCode;
+    return out;
+  }
+  Store.sanitizeTrip = sanitizeTrip;
+
   Store.importJSON = function (text) {
-    var parsed = JSON.parse(text);
-    var trips = parsed.trips || (Array.isArray(parsed) ? parsed : null);
+    var parsed;
+    try { parsed = JSON.parse(text); } catch (e) { throw new Error('JSON 파일을 읽을 수 없어요.'); }
+    var trips = (parsed && parsed.trips) || (Array.isArray(parsed) ? parsed : null);
     if (!Array.isArray(trips)) throw new Error('백업 파일 형식이 올바르지 않습니다.');
-    trips.forEach(function (t) {
-      if (!t.id) t.id = Core.uid('trip');
-      if (!t.data) t.data = {};
-      COLLS.forEach(function (c) { if (!Array.isArray(t.data[c])) t.data[c] = []; });
-      // 아이디가 겹치면 새 아이디
+    var added = [];
+    trips.forEach(function (raw) {
+      var t = sanitizeTrip(raw);
       while (state.trips.some(function (x) { return x.id === t.id; })) t.id = Core.uid('trip');
       state.trips.push(t);
+      added.push(t);
     });
-    if (trips.length) state.currentTripId = trips[0].id;
+    if (added.length) {
+      state.currentTripId = added[0].id;
+      Store.fitDaysToTrip(added[0].id);
+    }
     notify();
-    return trips.length;
+    return added.length;
   };
   Store.clearAll = function () {
     state = blank();

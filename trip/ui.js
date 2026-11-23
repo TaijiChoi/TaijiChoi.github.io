@@ -69,6 +69,100 @@
     return '<span class="avatars">' + list.map(function (m) { return UI.avatar(m.name); }).join('') +
       (extra > 0 ? '<span class="avatar" style="background:#E8EDF6;color:#64748B">+' + extra + '</span>' : '') + '</span>';
   };
+  /* ------------------------------------------------------- member chips */
+  /** 색 배지가 붙은 일행 칩. remove 액션 이름을 주면 × 버튼이 생긴다. */
+  UI.memberChip = function (m, opts) {
+    opts = opts || {};
+    return '<span class="mchip' + (opts.me ? ' me' : '') + '">' +
+      UI.avatar(m.name, 'sm') +
+      '<span class="nm">' + UI.esc(m.name) + '</span>' +
+      (opts.me ? '<span class="me-tag">나</span>' : '') +
+      (opts.remove
+        ? '<button type="button" class="chip-x" data-action="' + opts.remove + '" data-id="' + UI.esc(m.id) + '" aria-label="' + UI.esc(m.name) + ' 삭제">' + UI.icon('close', 11) + '</button>'
+        : '') +
+      '</span>';
+  };
+
+  /* ------------------------------------------------------------ calendar */
+  UI.calendarHtml = function (o) {
+    o = o || {};
+    var start = Core.isISODate(o.start) ? o.start : '';
+    var end = Core.isISODate(o.end) ? o.end : '';
+    var month = /^\d{4}-\d{2}$/.test(o.month || '') ? o.month : Core.monthKeyOf(start || Core.todayISO());
+    var weeks = Core.monthWeeks(month);
+    var html = '<div class="cal" data-month="' + month + '">';
+    html += '<div class="cal-head">' +
+      '<button type="button" class="cal-nav" data-action="cal-prev" aria-label="이전 달">' + UI.icon('back', 18) + '</button>' +
+      '<div class="cal-month" aria-live="polite">' + Core.monthLabel(month) + '</div>' +
+      '<button type="button" class="cal-nav fwd" data-action="cal-next" aria-label="다음 달">' + UI.icon('back', 18) + '</button>' +
+    '</div>';
+    html += '<div class="cal-wd">' + ['일', '월', '화', '수', '목', '금', '토'].map(function (w, i) {
+      return '<span class="' + (i === 0 ? 'sun' : i === 6 ? 'sat' : '') + '">' + w + '</span>';
+    }).join('') + '</div>';
+    html += '<div class="cal-grid">';
+    weeks.forEach(function (week) {
+      week.forEach(function (c) {
+        var cls = 'cal-day';
+        if (c.out) cls += ' out';
+        if (c.today) cls += ' today';
+        if (start && c.iso === start) cls += ' start';
+        if (end && c.iso === end && end !== start) cls += ' end';
+        if (start && end && c.iso > start && c.iso < end) cls += ' in';
+        if (c.wd === 0) cls += ' sun';
+        if (c.wd === 6) cls += ' sat';
+        html += '<button type="button" class="' + cls + '" data-action="cal-pick" data-date="' + c.iso + '" ' +
+          'aria-label="' + Core.isoFullLabel(c.iso) + '">' + c.day + '</button>';
+      });
+    });
+    html += '</div>';
+    var sum = '';
+    if (start) sum = end && end !== start ? Core.isoMDwd(start) + ' ~ ' + Core.isoMDwd(end) : Core.isoMDwd(start);
+    html += '<div class="cal-legend">' + (start
+      ? '<b>' + UI.esc(sum) + '</b><span>' + (end ? Core.stayLabel(start, end) : '종료일을 눌러 주세요') + '</span>'
+      : '<span class="muted">시작일을 눌러 주세요</span>') + '</div>';
+    html += '<div class="cal-quick">' + [0, 1, 2, 3, 4].map(function (n) {
+      return '<button type="button" class="cal-chip" data-action="cal-preset" data-nights="' + n + '">' +
+        (n === 0 ? '당일' : n + '박 ' + (n + 1) + '일') + '</button>';
+    }).join('') + '</div>';
+    html += '</div>';
+    return html;
+  };
+
+  /** 기간 선택 필드: 버튼을 누르면 폼 안에서 달력이 펼쳐진다 */
+  UI.rangeFieldHtml = function (o) {
+    o = o || {};
+    var start = Core.isISODate(o.start) ? o.start : '';
+    var end = Core.isISODate(o.end) ? o.end : '';
+    var days = start && end ? Core.diffDays(start, end) + 1 : 0;
+    var label = start ? Core.isoMDwd(start) + (end && end !== start ? ' ~ ' + Core.isoMDwd(end) : '') : '날짜를 골라 주세요';
+    var sub = !start ? '달력에서 시작일과 종료일을 차례로 눌러 주세요'
+      : end ? Core.stayLabel(start, end) + ' · ' + days + '일'
+        : '시작일을 골랐어요 · 종료일을 눌러 주세요';
+    return '<div class="range-field' + (o.open ? ' open' : '') + '" id="range-field">' +
+      '<button type="button" class="range-btn" data-action="cal-toggle" aria-expanded="' + (o.open ? 'true' : 'false') + '">' +
+        '<span class="range-ic">' + UI.icon('calendar', 20) + '</span>' +
+        '<span class="range-txt"><b id="range-label">' + UI.esc(label) + '</b><small id="range-sub">' + UI.esc(sub) + '</small></span>' +
+        '<span class="range-chev">' + UI.icon('down', 16) + '</span>' +
+      '</button>' +
+      '<div class="cal-wrap' + (o.open ? '' : ' hide') + '" id="cal-wrap">' +
+        (o.open ? UI.calendarHtml({ start: start, end: end, month: o.month }) : '') +
+      '</div>' +
+    '</div>';
+  };
+
+  /** 여행 상세 상단의 일행 줄 */
+  UI.peopleBarHtml = function (trip) {
+    var members = trip.members || [];
+    var me = Store.meId(trip, null);
+    return '<div class="people-bar">' +
+      '<div class="people-list">' + (members.length ? members.map(function (m) {
+        return '<span class="pchip' + (m.id === me ? ' me' : '') + '">' + UI.avatar(m.name, 'sm') +
+          '<span class="nm">' + UI.esc(m.name) + '</span>' + (m.id === me ? '<span class="me-tag">나</span>' : '') + '</span>';
+      }).join('') : '<span class="tiny muted">일행을 추가해 보세요</span>') + '</div>' +
+      '<button type="button" class="people-add" data-action="manage-members">' + UI.icon('plus', 14) + '일행</button>' +
+    '</div>';
+  };
+
   UI.thumbBg = function (seed) {
     var hues = [[214, 100, 58], [174, 92, 44], [262, 78, 62], [24, 92, 58], [330, 80, 60], [196, 88, 50]];
     var h = 0;

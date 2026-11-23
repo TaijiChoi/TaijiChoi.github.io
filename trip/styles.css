@@ -448,3 +448,92 @@ select.input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xml
 .badge-line{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);margin-top:6px}
 .dot-live{width:7px;height:7px;border-radius:50%;background:var(--mint);box-shadow:0 0 0 3px rgba(0,199,174,.18)}
 .dot-live.off{background:var(--sub-2);box-shadow:none}
+
+/* --------------------------------------------------------- member chips */
+.avatar.sm{width:24px;height:24px;font-size:10px}
+.mchip{display:inline-flex;align-items:center;gap:6px;height:38px;padding:0 8px 0 5px;border-radius:12px;
+  background:#fff;border:1px solid var(--line);font-size:13px;font-weight:700;color:var(--ink-2)}
+.mchip .avatar{width:26px;height:26px;font-size:10.5px}
+.mchip.me{background:var(--blue-l);border-color:#BFD8FF;color:var(--blue-d)}
+.mchip .nm{max-width:9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.me-tag{display:inline-flex;align-items:center;justify-content:center;height:17px;padding:0 5px;border-radius:5px;
+  background:var(--blue);color:#fff;font-size:9.5px;font-weight:800;letter-spacing:.2px;flex:none}
+.mchip .chip-x{width:22px;height:22px;border:0;border-radius:7px;background:#F1F4F9;color:var(--sub);
+  display:grid;place-items:center;margin-left:1px;flex:none}
+.mchip .chip-x:active{background:#E6EBF4}
+.mchip .chip-x svg{width:11px;height:11px}
+.mpick .me-tag{margin-left:1px}
+
+/* ------------------------------------------------------------- calendar */
+.range-field{margin-top:2px}
+.range-btn{display:flex;align-items:center;gap:11px;width:100%;height:60px;padding:0 13px;border:1px solid var(--line);
+  border-radius:14px;background:#fff;text-align:left;transition:border-color .15s,box-shadow .15s}
+.range-field.open .range-btn{border-color:var(--blue);box-shadow:0 0 0 3px rgba(54,143,255,.13)}
+.range-ic{width:36px;height:36px;border-radius:11px;background:var(--blue-l);color:var(--blue-d);
+  display:grid;place-items:center;flex:none}
+.range-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.range-txt b{font-size:14.5px;font-weight:750;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.range-txt small{font-size:11.5px;color:var(--sub);font-weight:600}
+.range-chev{color:var(--sub-2);display:flex;transition:transform .2s}
+.range-field.open .range-chev{transform:rotate(180deg)}
+.cal-wrap{margin-top:9px;border:1px solid var(--line);border-radius:16px;background:#fff;padding:10px 10px 8px}
+.cal-wrap.hide{display:none}
+.cal-head{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.cal-month{flex:1;text-align:center;font-size:14.5px;font-weight:800;letter-spacing:-.2px}
+.cal-nav{width:34px;height:34px;border:0;border-radius:10px;background:#F5F7FB;color:var(--ink-2);
+  display:grid;place-items:center}
+.cal-nav svg{width:17px;height:17px}
+.cal-nav.fwd svg{transform:rotate(180deg)}
+.cal-nav:active{background:#E9EEF7}
+.cal-wd{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:3px}
+.cal-wd span{text-align:center;font-size:11px;font-weight:700;color:var(--sub-2);padding:3px 0}
+.cal-wd span.sun{color:#E2585C}
+.cal-wd span.sat{color:var(--blue-d)}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr)}
+.cal-day{position:relative;height:40px;border:0;border-radius:0;background:transparent;font-size:13.5px;
+  font-weight:650;color:var(--ink-2);display:grid;place-items:center;padding:0}
+.cal-day.out{color:#C3CBDA}
+.cal-day.sun{color:#E2585C}
+.cal-day.sat{color:var(--blue-d)}
+.cal-day.today::after{content:"";position:absolute;bottom:5px;left:50%;transform:translateX(-50%);
+  width:4px;height:4px;border-radius:50%;background:var(--mint)}
+.cal-day.in{background:var(--blue-l)}
+.cal-day.start,.cal-day.end{background:var(--blue);color:#fff;box-shadow:0 4px 10px rgba(54,143,255,.28)}
+.cal-day.start{border-radius:10px 0 0 10px}
+.cal-day.end{border-radius:0 10px 10px 0}
+.cal-day.start.end{border-radius:10px}
+.cal-day:active{filter:brightness(.95)}
+.cal-legend{display:flex;align-items:center;gap:8px;padding:9px 3px 3px;font-size:12px}
+.cal-legend b{font-weight:800;color:var(--ink)}
+.cal-legend span{color:var(--sub);font-weight:650;margin-left:auto}
+.cal-quick{display:flex;gap:5px;flex-wrap:wrap;padding-top:7px;border-top:1px dashed #EDF1F7;margin-top:6px}
+.cal-chip{height:29px;padding:0 10px;border-radius:9px;border:1px solid var(--line);background:#fff;
+  font-size:11.5px;font-weight:700;color:var(--sub)}
+.cal-chip:active{background:#F1F4F9}
+
+/* ------------------------------------------------------------ people bar */
+.people-bar{display:flex;align-items:center;gap:8px;padding:9px 16px 1px}
+.people-list{display:flex;gap:5px;overflow-x:auto;flex:1;min-width:0;scrollbar-width:none;
+  -webkit-overflow-scrolling:touch;padding:1px 0}
+.people-list::-webkit-scrollbar{display:none}
+.pchip{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 9px 0 4px;border-radius:9px;
+  background:#fff;border:1px solid var(--line);font-size:12px;font-weight:700;color:var(--ink-2);flex:none}
+.pchip .avatar{width:21px;height:21px;font-size:9px}
+.pchip.me{background:var(--blue-l);border-color:#BFD8FF;color:var(--blue-d)}
+.people-add{display:inline-flex;align-items:center;gap:3px;height:30px;padding:0 10px;border-radius:9px;
+  border:1px dashed #C9D6EA;background:#fff;font-size:12px;font-weight:750;color:var(--blue-d);flex:none}
+.people-add:active{background:var(--blue-l)}
+
+/* ------------------------------------------------------- member manager */
+.mem-rows{margin-top:12px;border:1px solid var(--line);border-radius:14px;padding:2px 12px;background:#fff}
+.mrow{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid #F1F4F9}
+.mrow:last-child{border-bottom:0}
+.mem-main{flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:0;background:none;
+  text-align:left;padding:0}
+.mem-main .tx{min-width:0;display:flex;flex-direction:column}
+.mem-main b{font-size:14px;font-weight:750;display:flex;align-items:center;gap:5px}
+.mem-main small{font-size:11px;color:var(--sub-2);font-weight:600;margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mrow .input{height:40px;border-radius:11px;flex:1;font-size:14px;min-width:0}
+.mrow.editing .icon-btn{color:var(--blue-d)}
+.who-list{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}

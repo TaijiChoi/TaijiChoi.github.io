@@ -30,7 +30,8 @@
       '<span class="item">' + UI.icon('users', 15) + (trip.members || []).length + '명</span>' +
       '<span class="item">' + UI.icon('wallet', 15) + (t.total ? Core.won(t.total) : '지출 없음') + '</span>' +
       '<span class="item" style="margin-left:auto">' + UI.avatarsHtml(trip.members, 4) + '</span>' +
-    '</div></div>';
+    '</div>' +
+    UI.peopleBarHtml(trip) + '</div>';
     return html;
   };
 
@@ -109,10 +110,9 @@
   };
 
   S.defaultDay = function (trip) {
-    var today = Core.todayISO();
-    var key = Core.dayKeyOfDate(trip, today);
+    var key = Core.dayKeyOfDate(trip, Core.todayISO());
     if (key !== 'prep') return key;
-    var d1 = Core.sortedSchedules(trip.data, 'd1');
-    return d1.length || Core.tripDayCount(trip) >= 1 ? 'd1' : 'prep';
+    var prep = Core.sortedSchedules(trip.data, 'prep');
+    return prep.length ? 'prep' : 'd1';
   };
 })(typeof window !== 'undefined' ? window : globalThis);

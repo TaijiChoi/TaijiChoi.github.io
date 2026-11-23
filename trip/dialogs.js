@@ -6,48 +6,60 @@
   var D = (TL.Dialogs = {});
   var A = (TL.Actions = TL.Actions || {});
 
-  var dlg = { kind: '', trip: null, id: null, members: [], sharedWith: [], private: false, payerId: '', dayKey: '' };
+  var dlg = { kind: '', trip: null, id: null, members: [], sharedWith: [], private: false, payerId: '', dayKey: '', meId: '' };
+  var cal = { open: false, month: '', start: '', end: '' };
+  var mem = { trip: null, editing: '' };
 
   function open(html, title) { UI.open(html, { title: title }); }
   function tripOf() { return D.trip; }
 
   /* ======================================================== 여행 만들기 */
+  function memberChipsHtml() {
+    return dlg.members.map(function (m) {
+      return UI.memberChip(m, { me: m.id === dlg.meId, remove: 'del-member-chip' });
+    }).join('');
+  }
   function memberEditorHtml() {
-    return '<div class="members-pick" id="member-list">' + dlg.members.map(function (m) {
-      return '<button class="mpick active" data-action="del-member-chip" data-id="' + UI.esc(m.id) + '">' +
-        UI.avatar(m.name) + UI.esc(m.name) + '<span class="ck">' + UI.icon('check', 11) + '</span></button>';
-    }).join('') + '</div>' +
-    '<div class="inline-add"><input class="input" id="member-new" placeholder="일행 이름 (예: 아내)" maxlength="12">' +
-    '<button class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="add-member-chip">추가</button></div>' +
-    '<div class="hintline">내 이름도 넣어 주세요. 정산에서 결제자로 선택할 수 있어요.</div>';
+    return '<div class="members-pick" id="member-list">' + memberChipsHtml() + '</div>' +
+      '<div class="inline-add"><input class="input" id="member-new" placeholder="일행 이름 (예: 아내)" maxlength="12" autocomplete="off" enterkeyhint="done">' +
+      '<button type="button" class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="add-member-chip">' + UI.icon('plus', 16) + '추가</button></div>' +
+      '<div class="hintline">이름을 넣고 <b>추가</b>(또는 Enter)를 누르면 색 배지로 붙어요. 배지의 × 를 누르면 빠져요.</div>';
   }
   function refreshMemberList() {
     var el = document.getElementById('member-list');
-    if (!el) return;
-    el.innerHTML = dlg.members.map(function (m) {
-      return '<button class="mpick active" data-action="del-member-chip" data-id="' + UI.esc(m.id) + '">' +
-        UI.avatar(m.name) + UI.esc(m.name) + '<span class="ck">' + UI.icon('check', 11) + '</span></button>';
-    }).join('');
+    if (el) el.innerHTML = memberChipsHtml();
+  }
+  function rangeInputsHtml() {
+    return '<input type="hidden" id="f_start" value="' + UI.esc(cal.start) + '">' +
+      '<input type="hidden" id="f_end" value="' + UI.esc(cal.end || cal.start) + '">';
+  }
+  function renderRangeField() {
+    var box = document.getElementById('range-field');
+    if (!box) return;
+    box.outerHTML = UI.rangeFieldHtml({ start: cal.start, end: cal.end, open: cal.open, month: cal.month });
+    var s = document.getElementById('f_start'), e = document.getElementById('f_end');
+    if (s) s.value = cal.start || '';
+    if (e) e.value = cal.end || cal.start || '';
   }
 
   D.newTrip = function () {
-    dlg = { kind: 'new-trip', members: [], id: null };
-    D.trip = null;
     var today = Core.todayISO();
     var nick = Store.settings().nickname;
-    dlg.members = [{ id: Core.uid('m'), name: nick || '나' }];
     var start = Core.addDays(today, 7), end = Core.addDays(today, 9);
+    dlg = { kind: 'new-trip', members: [{ id: Core.uid('m'), name: nick || '나' }], id: null };
+    dlg.meId = dlg.members[0].id;
+    D.trip = null;
+    cal = { open: false, month: Core.monthKeyOf(start), start: start, end: end };
     var html = '';
     html += '<div class="form-row"><label class="fl">여행 이름</label>' +
-      '<input class="input" id="f_name" placeholder="예: 오사카 3박 4일" maxlength="40"></div>';
+      '<input class="input" id="f_name" placeholder="예: 오사카 3박 4일" maxlength="40" autocomplete="off"></div>';
     html += '<div class="form-row"><label class="fl">여행지</label>' +
-      '<input class="input" id="f_dest" placeholder="예: 오사카 · 교토" maxlength="40"></div>';
-    html += '<div class="form-row"><label class="fl">기간</label><div class="two">' +
-      '<input class="input" type="date" id="f_start" value="' + start + '">' +
-      '<input class="input" type="date" id="f_end" value="' + end + '"></div></div>';
+      '<input class="input" id="f_dest" placeholder="예: 오사카 · 교토" maxlength="40" autocomplete="off"></div>';
+    html += '<div class="form-row"><label class="fl">기간</label>' +
+      UI.rangeFieldHtml({ start: start, end: end, open: false, month: cal.month }) + rangeInputsHtml() + '</div>';
     html += '<div class="form-row"><label class="fl">기본 통화</label>' +
       '<select class="input" id="f_cur">' + Core.CURRENCIES.map(function (c) {
-        return '<option value="' + c.code + '"' + (c.code === 'JPY' ? '' : '') + '>' + c.code + ' · ' + c.name + '</option>';
+        return '<option value="' + c.code + '"' + (c.code === 'KRW' ? ' selected' : '') + '>' + c.code + ' · ' + c.name + '</option>';
       }).join('') + '</select></div>';
     html += '<div class="form-row"><label class="fl">일행</label>' + memberEditorHtml() + '</div>';
     html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">취소</button>' +
@@ -58,37 +70,37 @@
   A['save-new-trip'] = function () {
     var name = UI.val('f_name').trim();
     if (!name) { UI.toast('여행 이름을 입력해 주세요'); return; }
-    var start = UI.val('f_start') || Core.todayISO();
-    var end = UI.val('f_end') || start;
-    if (Core.diffDays(start, end) < 0) { var tmp = start; start = end; end = tmp; }
-    var members = dlg.members.length ? dlg.members : [{ id: Core.uid('m'), name: '나' }];
+    var chk = Core.checkRange(cal.start, cal.end || cal.start);
+    if (!chk.ok) { UI.toast(chk.error); cal.open = true; renderRangeField(); return; }
+    var members = dlg.members.length ? dlg.members : [{ id: Core.uid('m'), name: Store.settings().nickname || '나' }];
     var trip = Store.createTrip({
       name: name,
       destination: UI.val('f_dest').trim(),
-      startDate: start,
-      endDate: end,
+      startDate: chk.start,
+      endDate: chk.end,
       baseCurrency: UI.val('f_cur') || 'KRW',
       members: members
     });
-    var nick = Store.settings().nickname;
-    if (!nick) Store.setNickname(members[0].name);
+    Store.setMeMember(trip.id, members.some(function (m) { return m.id === dlg.meId; }) ? dlg.meId : members[0].id);
+    if (!Store.settings().nickname) Store.setNickname(members[0].name);
     UI.close();
     TL.App.openTrip(trip.id, 'schedule');
-    UI.toast('여행을 만들었어요');
+    UI.toast('여행을 만들었어요 · ' + Core.stayLabel(chk.start, chk.end));
   };
 
   /* ======================================================== 여행 정보 수정 */
   D.editTrip = function (trip) {
     dlg = { kind: 'edit-trip', members: (trip.members || []).slice(), id: trip.id, trip: trip };
+    dlg.meId = Store.meId(trip, (trip.members[0] || {}).id);
     D.trip = trip;
+    cal = { open: false, month: Core.monthKeyOf(trip.startDate), start: trip.startDate, end: trip.endDate || trip.startDate };
     var html = '';
     html += '<div class="form-row"><label class="fl">여행 이름</label>' +
-      '<input class="input" id="f_name" value="' + UI.esc(trip.name) + '" maxlength="40"></div>';
+      '<input class="input" id="f_name" value="' + UI.esc(trip.name) + '" maxlength="40" autocomplete="off"></div>';
     html += '<div class="form-row"><label class="fl">여행지</label>' +
-      '<input class="input" id="f_dest" value="' + UI.esc(trip.destination || '') + '" maxlength="40"></div>';
-    html += '<div class="form-row"><label class="fl">기간</label><div class="two">' +
-      '<input class="input" type="date" id="f_start" value="' + UI.esc(trip.startDate) + '">' +
-      '<input class="input" type="date" id="f_end" value="' + UI.esc(trip.endDate) + '"></div></div>';
+      '<input class="input" id="f_dest" value="' + UI.esc(trip.destination || '') + '" maxlength="40" autocomplete="off"></div>';
+    html += '<div class="form-row"><label class="fl">기간</label>' +
+      UI.rangeFieldHtml({ start: cal.start, end: cal.end, open: false, month: cal.month }) + rangeInputsHtml() + '</div>';
     html += '<div class="form-row"><label class="fl">일행</label>' + memberEditorHtml() + '</div>';
     html += '<div class="sheet-foot"><button class="btn btn-danger" data-action="delete-trip" style="flex:.7">삭제</button>' +
       '<button class="btn btn-primary" data-action="save-edit-trip">저장</button></div>';
@@ -99,18 +111,24 @@
     var trip = tripOf() || TL.App.currentTrip();
     if (!trip) { UI.toast('여행 정보를 찾을 수 없어요'); return; }
     var name = UI.val('f_name').trim() || trip.name;
-    var start = UI.val('f_start') || trip.startDate;
-    var end = UI.val('f_end') || start;
-    if (Core.diffDays(start, end) < 0) { var tmp = start; start = end; end = tmp; }
+    var chk = Core.checkRange(cal.start || trip.startDate, cal.end || trip.endDate || trip.startDate);
+    if (!chk.ok) { UI.toast(chk.error); cal.open = true; renderRangeField(); return; }
+    var members = dlg.members.length ? dlg.members : trip.members;
+    // 폼에서 빠진 일행은 지출·준비물 참조까지 정리한다
+    (trip.members || []).forEach(function (m) {
+      if (!members.some(function (x) { return x.id === m.id; })) Store.removeMember(trip.id, m.id);
+    });
     Store.updateTrip(trip.id, {
       name: name,
       destination: UI.val('f_dest').trim(),
-      startDate: start,
-      endDate: end,
-      members: dlg.members.length ? dlg.members : trip.members
+      startDate: chk.start,
+      endDate: chk.end,
+      members: members
     });
+    var moved = Store.fitDaysToTrip(trip.id);
+    if (members.some(function (m) { return m.id === dlg.meId; })) Store.setMeMember(trip.id, dlg.meId);
     UI.close();
-    UI.toast('저장했어요');
+    UI.toast(moved ? '저장했어요 · 사라진 날의 ' + moved + '개 항목을 마지막 날로 옮겼어요' : '저장했어요', moved ? 3200 : 2200);
   };
 
   A['delete-trip'] = function () {
@@ -126,23 +144,214 @@
   A['add-member-chip'] = function () {
     var el = document.getElementById('member-new');
     var v = el ? el.value.trim() : '';
-    if (!v) return;
-    if (dlg.members.some(function (m) { return m.name === v; })) { UI.toast('이미 있는 이름이에요'); return; }
-    dlg.members.push({ id: Core.uid('m'), name: v });
-    if (el) el.value = '';
+    if (!v) { if (el) el.focus(); UI.toast('일행 이름을 입력해 주세요'); return; }
+    if (v.length > 12) { UI.toast('이름은 12자까지 쓸 수 있어요'); return; }
+    if (dlg.members.some(function (m) { return m.name === v; })) { UI.toast('이미 있는 이름이에요'); if (el) el.select(); return; }
+    var m = { id: Core.uid('m'), name: v };
+    dlg.members.push(m);
+    if (!dlg.meId) dlg.meId = m.id;
+    if (el) { el.value = ''; el.focus(); }
     refreshMemberList();
   };
   A['del-member-chip'] = function (el) {
     var id = el.getAttribute('data-id');
     if (dlg.members.length <= 1) { UI.toast('최소 한 명은 필요해요'); return; }
     dlg.members = dlg.members.filter(function (m) { return m.id !== id; });
+    if (dlg.meId === id) dlg.meId = dlg.members[0].id;
     refreshMemberList();
+  };
+
+  /* ------------------------------------------------- 달력(기간 선택) */
+  A['cal-toggle'] = function () {
+    cal.open = !cal.open;
+    if (cal.open) cal.month = Core.monthKeyOf(cal.start || Core.todayISO());
+    renderRangeField();
+  };
+  A['cal-prev'] = function () { cal.month = Core.shiftMonth(cal.month, -1); renderRangeField(); };
+  A['cal-next'] = function () { cal.month = Core.shiftMonth(cal.month, 1); renderRangeField(); };
+  A['cal-pick'] = function (el) {
+    var d = el.getAttribute('data-date');
+    if (!Core.isISODate(d)) return;
+    if (!cal.start || (cal.start && cal.end)) {
+      cal.start = d;
+      cal.end = '';
+    } else if (d < cal.start) {
+      cal.end = cal.start;
+      cal.start = d;
+    } else {
+      cal.end = d;
+    }
+    cal.month = Core.monthKeyOf(d);
+    if (cal.end) cal.open = false;
+    renderRangeField();
+  };
+  A['cal-preset'] = function (el) {
+    var n = Number(el.getAttribute('data-nights')) || 0;
+    var base = Core.isISODate(cal.start) ? cal.start : Core.todayISO();
+    var end = Core.addDays(base, n);
+    cal.start = base;
+    cal.end = end;
+    cal.open = false;
+    cal.month = Core.monthKeyOf(base);
+    renderRangeField();
+    UI.toast('기간을 ' + Core.stayLabel(base, end) + '로 정했어요');
+  };
+
+  /* ========================================================== 일행 관리 */
+  function memRows(trip) {
+    var me = Store.meId(trip, null);
+    return (trip.members || []).map(function (m) {
+      var st = Store.memberStats(trip, m.id);
+      var sub = (st.paidCount ? '결제 ' + st.paidCount + '건 · ' + Core.won(st.paidSum) : '결제 없음') +
+        (st.checkCount ? ' · 준비물 ' + st.checkCount + '개' : '');
+      if (mem.editing === m.id) {
+        return '<div class="mrow editing" data-id="' + UI.esc(m.id) + '">' + UI.avatar(m.name, 'lg') +
+          '<input class="input" id="mem-edit-input" value="' + UI.esc(m.name) + '" maxlength="12" autocomplete="off">' +
+          '<button class="icon-btn sm" data-action="mem-save" data-id="' + UI.esc(m.id) + '" aria-label="이름 저장">' + UI.icon('check') + '</button>' +
+          '<button class="icon-btn sm" data-action="mem-cancel" aria-label="취소">' + UI.icon('close') + '</button>' +
+        '</div>';
+      }
+      return '<div class="mrow" data-id="' + UI.esc(m.id) + '">' +
+        '<button type="button" class="mem-main" data-action="mem-set-me" data-id="' + UI.esc(m.id) + '" aria-label="' + UI.esc(m.name) + ' 내 이름으로 지정">' +
+          UI.avatar(m.name, 'lg') +
+          '<span class="tx"><b>' + UI.esc(m.name) + (m.id === me ? ' <span class="me-tag">나</span>' : '') + '</b><small>' + UI.esc(sub) + '</small></span>' +
+        '</button>' +
+        '<button class="icon-btn sm" data-action="mem-edit" data-id="' + UI.esc(m.id) + '" aria-label="' + UI.esc(m.name) + ' 이름 수정">' + UI.icon('edit', 16) + '</button>' +
+        '<button class="icon-btn sm danger" data-action="mem-del" data-id="' + UI.esc(m.id) + '" aria-label="' + UI.esc(m.name) + ' 삭제">' + UI.icon('trash', 16) + '</button>' +
+      '</div>';
+    }).join('');
+  }
+  function refreshMemRows() {
+    var el = document.getElementById('mem-rows');
+    if (el && mem.trip) el.innerHTML = memRows(mem.trip);
+    UI.refresh();
+  }
+  D.members = function (trip) {
+    if (!trip) return;
+    mem = { trip: trip, editing: '' };
+    var html = '<div class="note">이름을 누르면 <b>내 이름</b>으로 지정돼요. 내가 결제자 기본값이 되고 정산에 ‘나’로 쓰여요.</div>' +
+      '<div class="mem-rows" id="mem-rows">' + memRows(trip) + '</div>' +
+      '<div class="inline-add" style="margin-top:12px"><input class="input" id="mem-new" placeholder="일행 이름 (예: 아내)" maxlength="12" autocomplete="off" enterkeyhint="done">' +
+      '<button type="button" class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="mem-add">' + UI.icon('plus', 16) + '추가</button></div>' +
+      '<div class="hintline">실시간 공유 중이면 이름 변경과 추가가 일행 모두에게 보여요.</div>' +
+      '<div class="sheet-foot"><button class="btn btn-primary" data-action="close-modal">완료</button></div>';
+    open(html, '일행 관리');
+  };
+  A['mem-add'] = function () {
+    var trip = mem.trip;
+    var el = document.getElementById('mem-new');
+    var v = el ? el.value.trim() : '';
+    if (!trip) return;
+    if (!v) { if (el) el.focus(); UI.toast('일행 이름을 입력해 주세요'); return; }
+    if (v.length > 12) { UI.toast('이름은 12자까지 쓸 수 있어요'); return; }
+    var m = Store.addMember(trip.id, v);
+    if (!m) { UI.toast('이미 있는 이름이에요'); return; }
+    if (el) { el.value = ''; el.focus(); }
+    refreshMemRows();
+    UI.toast(m.name + ' 추가했어요');
+  };
+  A['mem-set-me'] = function (el) {
+    var trip = mem.trip;
+    var id = el.getAttribute('data-id');
+    if (!trip) return;
+    Store.setMeMember(trip.id, id);
+    var m = Store.myMember(trip);
+    if (m) { Store.setNickname(m.name); UI.toast(m.name + ' 님으로 설정했어요'); }
+    refreshMemRows();
+  };
+  A['mem-edit'] = function (el) {
+    mem.editing = el.getAttribute('data-id');
+    refreshMemRows();
+    var input = document.getElementById('mem-edit-input');
+    if (input) { input.focus(); input.select(); }
+  };
+  A['mem-cancel'] = function () { mem.editing = ''; refreshMemRows(); };
+  A['mem-save'] = function (el) {
+    var trip = mem.trip;
+    var id = el.getAttribute('data-id');
+    var input = document.getElementById('mem-edit-input');
+    if (!trip || !id) return;
+    var r = Store.renameMember(trip.id, id, input ? input.value : '');
+    if (!r.ok) { UI.toast(r.error); if (input) input.focus(); return; }
+    mem.editing = '';
+    refreshMemRows();
+    UI.toast('이름을 바꿨어요');
+  };
+  A['mem-del'] = function (el) {
+    var trip = mem.trip;
+    var id = el.getAttribute('data-id');
+    if (!trip) return;
+    var m = (trip.members || []).filter(function (x) { return x.id === id; })[0];
+    if (!m) return;
+    var st = Store.memberStats(trip, id);
+    var msg = '“' + m.name + '” 님을 일행에서 뺄까요?';
+    if (st.paidCount) msg += '\n결제한 지출 ' + st.paidCount + '건은 다른 일행에게로 옮겨요.';
+    if (!confirm(msg)) return;
+    var r = Store.removeMember(trip.id, id);
+    if (!r.ok) { UI.toast(r.error); return; }
+    refreshMemRows();
+    UI.toast('일행에서 뺐어요');
+  };
+
+  /* ====================================================== 나는 누구인가요 */
+  D.whoAmI = function (trip) {
+    if (!trip) return;
+    mem = { trip: trip, editing: '' };
+    var ms = trip.members || [];
+    var nick = Store.settings().nickname;
+    var html = '<div class="note">일행 목록에서 나를 골라 주세요. 결제자와 정산이 내 기준으로 계산돼요.</div>';
+    if (ms.length) {
+      html += '<div class="who-list" id="who-list">' + ms.map(function (m) {
+        return '<button type="button" class="mpick" data-action="who-pick" data-id="' + UI.esc(m.id) + '">' +
+          UI.avatar(m.name) + UI.esc(m.name) + '</button>';
+      }).join('') + '</div>';
+    }
+    html += '<div class="form-row mt12"><label class="fl">목록에 없어요 · 새 일행으로 합류</label>' +
+      '<div class="inline-add" style="margin-top:0"><input class="input" id="who-new" placeholder="내 이름" maxlength="12" value="' + UI.esc(nick) + '" autocomplete="off">' +
+      '<button type="button" class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="who-join">합류</button></div></div>' +
+      '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">나중에</button></div>';
+    open(html, '나는 누구인가요?');
+  };
+  D.maybeWhoAmI = function (trip) {
+    if (!trip || !(trip.members || []).length) return false;
+    var explicit = (Store.state().meByTrip || {})[trip.id];
+    if (explicit && (trip.members || []).some(function (m) { return m.id === explicit; })) return false;
+    var nick = Store.settings().nickname;
+    if (nick && (trip.members || []).some(function (m) { return m.name === nick; })) return false;
+    D.whoAmI(trip);
+    return true;
+  };
+  A['who-pick'] = function (el) {
+    var trip = mem.trip;
+    var id = el.getAttribute('data-id');
+    if (!trip) return;
+    Store.setMeMember(trip.id, id);
+    var m = Store.myMember(trip);
+    if (m) {
+      if (!Store.settings().nickname) Store.setNickname(m.name);
+      UI.toast(m.name + ' 님으로 설정했어요');
+    }
+    UI.close();
+  };
+  A['who-join'] = function () {
+    var trip = mem.trip;
+    var el = document.getElementById('who-new');
+    var v = el ? el.value.trim() : '';
+    if (!trip) return;
+    if (!v) { if (el) el.focus(); UI.toast('이름을 입력해 주세요'); return; }
+    var m = Store.addMember(trip.id, v);
+    if (!m) { UI.toast('이름을 다시 확인해 주세요'); return; }
+    Store.setMeMember(trip.id, m.id);
+    Store.setNickname(m.name);
+    UI.close();
+    UI.toast(v + ' 님으로 합류했어요');
   };
 
   /* ============================================================== 일정 */
   D.schedule = function (trip, id, dayKey) {
     var item = null;
     ((trip.data && trip.data.schedules) || []).forEach(function (s) { if (s.id === id) item = s; });
+    if (id && !item) { UI.toast('일정을 찾을 수 없어요'); return; }
     dlg = { kind: 'schedule', id: id || null, trip: trip };
     D.trip = trip;
     var day = item ? item.dayKey : (dayKey || TL.App.view.day || 'd1');
@@ -205,14 +414,18 @@
   D.expense = function (trip, id) {
     var item = null;
     ((trip.data && trip.data.expenses) || []).forEach(function (e) { if (e.id === id) item = e; });
+    if (id && !item) { UI.toast('지출을 찾을 수 없어요'); return; }
     var members = trip.members || [];
     var me = Store.meId(trip, members[0] && members[0].id);
+    var dayKeys = Core.dayList(trip).map(function (d) { return d.key; });
+    var wantDay = item ? item.dayKey : (TL.App.view.day && TL.App.view.day !== 'all' ? TL.App.view.day : 'd1');
+    if (dayKeys.indexOf(wantDay) < 0) wantDay = dayKeys[dayKeys.length - 1] || 'prep';
     dlg = {
       kind: 'expense', id: id || null, trip: trip,
       sharedWith: item ? (item.sharedWith || []).slice() : members.map(function (m) { return m.id; }),
       payerId: item ? (item.payerId || me) : me,
       private: item ? !!item.private : false,
-      dayKey: item ? item.dayKey : (TL.App.view.day && TL.App.view.day !== 'all' ? TL.App.view.day : 'd1')
+      dayKey: wantDay
     };
     D.trip = trip;
     var cur = item ? item.currency : (trip.baseCurrency && trip.baseCurrency !== 'KRW' ? trip.baseCurrency : (trip.baseCurrency || 'KRW'));
@@ -253,7 +466,7 @@
     html += '<div class="form-row"><label class="fl">결제한 사람</label><div class="members-pick" id="payer-pick">' +
       members.map(function (m) {
         return '<button class="mpick' + (m.id === dlg.payerId ? ' active' : '') + '" data-action="pick-payer" data-id="' + UI.esc(m.id) + '">' +
-          UI.avatar(m.name) + UI.esc(m.name) + '</button>';
+          UI.avatar(m.name) + UI.esc(m.name) + (m.id === me ? '<span class="me-tag">나</span>' : '') + '</button>';
       }).join('') + '</div></div>';
 
     html += '<div class="form-row"><label class="fl row between" style="display:flex">' +
@@ -502,6 +715,8 @@
         '링크에 Firebase 설정이 함께 담겨 있어서 따로 설정할 필요가 없습니다.</div>';
       html += '<div class="kv mt12"><span class="k">참여 중인 일행</span><span class="v">' +
         (trip.members || []).map(function (m) { return UI.esc(m.name); }).join(' · ') + '</span></div>';
+      html += '<div class="btn-row mt12"><button class="btn btn-ghost" data-action="manage-members">' +
+        UI.icon('users', 18) + '일행 관리</button></div>';
       html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">닫기</button></div>';
     } else {
       var cfgOk = !!Store.firebaseConfig();
@@ -511,6 +726,8 @@
         '<div class="kv"><span class="k">현재 모드</span><span class="v">로컬 저장</span></div>' +
         '<div class="kv"><span class="k">Firebase 설정</span><span class="v">' + (cfgOk ? '입력됨' : '없음') + '</span></div>' +
       '</div>';
+      html += '<div class="btn-row mt12"><button class="btn btn-ghost" data-action="manage-members">' +
+        UI.icon('users', 18) + '일행 관리</button></div>';
       html += '<div class="sheet-foot">' +
         '<button class="btn btn-ghost" data-action="open-settings">설정 열기</button>' +
         (cfgOk
@@ -575,7 +792,7 @@
     UI.toast('여행을 불러오는 중…');
     Store.joinByCode(code, nick).then(function (trip) {
       TL.App.openTrip(trip.id, 'schedule');
-      UI.toast('참여했어요');
+      if (!D.maybeWhoAmI(Store.trip(trip.id))) UI.toast('참여했어요');
     }).catch(function (e) {
       UI.toast('참여 실패: ' + (e.message || e));
     });

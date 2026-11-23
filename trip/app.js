@@ -49,6 +49,8 @@
     App.view.tripId = id;
     App.view.tab = tab || 'schedule';
     App.view.day = '';
+    App.view.mDay = 'all';
+    App.view.mCat = 'all';
     Store.setCurrent(id);
     setHash();
     render();
@@ -161,6 +163,8 @@
     switch (act) {
       case 'new-trip': TL.Dialogs.newTrip(); return;
       case 'edit-trip': if (trip) TL.Dialogs.editTrip(trip); return;
+      case 'manage-members': if (trip) TL.Dialogs.members(trip); return;
+      case 'who-am-i': if (trip) TL.Dialogs.whoAmI(trip); return;
       case 'open-share': if (trip) TL.Dialogs.share(trip); return;
       case 'join-trip': TL.Dialogs.join(); return;
       case 'open-settings': TL.Dialogs.settings(trip); return;
@@ -204,11 +208,19 @@
   document.addEventListener('change', onFieldChange);
 
   document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') {
+      if (TL.UI.modalOpen()) { TL.UI.close(); ev.preventDefault(); }
+      return;
+    }
     if (ev.key !== 'Enter') return;
     var id = ev.target.id;
     if (id === 'member-new') { ev.preventDefault(); if (A['add-member-chip']) A['add-member-chip'](); }
+    if (id === 'mem-new') { ev.preventDefault(); if (A['mem-add']) A['mem-add'](); }
+    if (id === 'mem-edit-input') { ev.preventDefault(); if (A['mem-save']) A['mem-save'](document.activeElement); }
+    if (id === 'who-new') { ev.preventDefault(); if (A['who-join']) A['who-join'](); }
     if (id === 'chk-new') { ev.preventDefault(); if (A['add-check']) A['add-check'](); }
     if (id === 'f_code') { ev.preventDefault(); if (A['do-join']) A['do-join'](); }
+    if (id === 'f_name' || id === 'f_dest') { ev.preventDefault(); }
     if (id === 'f_amount') { ev.preventDefault(); }
   });
 
@@ -248,6 +260,7 @@
         Store.joinByCode(code, Store.settings().nickname).then(function (t) {
           App.openTrip(t.id, 'schedule');
           cleanUrl();
+          TL.Dialogs.maybeWhoAmI(Store.trip(t.id));
         }).catch(function (e) {
           UI.toast('참여 실패: ' + (e.message || e), 4000);
           TL.Dialogs.join();

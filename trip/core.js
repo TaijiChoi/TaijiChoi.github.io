@@ -141,7 +141,8 @@
     return pad(h) + ':' + pad(m);
   };
 
-  Core.dday = function (trip) {    if (!trip || !trip.startDate) return '';
+  Core.dday = function (trip) {
+    if (!trip || !trip.startDate) return '';
     var today = Core.todayISO();
     var toStart = Core.diffDays(today, trip.startDate);
     var toEnd = Core.diffDays(today, trip.endDate || trip.startDate);
@@ -183,7 +184,96 @@
     if (!trip || !trip.startDate || !isoStr) return 'prep';
     var n = Core.diffDays(trip.startDate, isoStr);
     if (n < 0) return 'prep';
-    return 'd' + (Core.clamp(n, 0, 59) + 1);
+    return 'd' + (Core.clamp(n, 0, Core.tripDayCount(trip) - 1) + 1);
+  };
+
+  /* ---------------------------------------------------------- calendar */
+  /** 실제로 존재하는 'YYYY-MM-DD'인지 (2026-02-30 같은 값 거르기) */
+  Core.isISODate = function (s) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(s == null ? '' : s))) return false;
+    var d = Core.parse(s);
+    return !!d && Core.iso(d) === String(s);
+  };
+  Core.monthKeyOf = function (isoStr) {
+    var d = Core.parse(isoStr) || new Date();
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1);
+  };
+  Core.monthLabel = function (monthKey) {
+    var p = String(monthKey || '').split('-');
+    if (p.length < 2) return '';
+    return Number(p[0]) + '년 ' + Number(p[1]) + '월';
+  };
+  Core.shiftMonth = function (monthKey, n) {
+    var p = String(monthKey || '').split('-');
+    var y = Number(p[0]) || 2000, m = Number(p[1]) || 1;
+    var d = new Date(y, m - 1 + Number(n || 0), 1);
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1);
+  };
+  Core.daysInMonth = function (monthKey) {
+    var p = String(monthKey || '').split('-');
+    var y = Number(p[0]), m = Number(p[1]);
+    if (!y || !m) return 31;
+    return new Date(y, m, 0).getDate();
+  };
+  /** 한 달 달력: 앞뒤 달을 채운 6주 × 7일 = 42칸 */
+  Core.monthGrid = function (monthKey) {
+    var p = String(monthKey || '').split('-');
+    var y = Number(p[0]) || 2000, m = Number(p[1]) || 1;
+    if (m < 1 || m > 12) {
+      y = y + Math.floor((m - 1) / 12);
+      m = ((m - 1) % 12 + 12) % 12 + 1;
+    }
+    var offset = new Date(y, m - 1, 1).getDay();
+    var first = new Date(y, m - 1, 1 - offset);
+    var today = Core.todayISO();
+    var out = [];
+    for (var i = 0; i < 42; i++) {
+      var d = new Date(first.getFullYear(), first.getMonth(), first.getDate() + i);
+      out.push({ iso: Core.iso(d), day: d.getDate(), wd: d.getDay(), out: d.getMonth() !== m - 1, today: Core.iso(d) === today });
+    }
+    return out;
+  };
+  Core.monthWeeks = function (monthKey) {
+    var g = Core.monthGrid(monthKey), weeks = [];
+    for (var i = 0; i < g.length; i += 7) weeks.push(g.slice(i, i + 7));
+    return weeks;
+  };
+  /** 두 날짜를 순서대로 정리 (시작일 > 종료일 방지) */
+  Core.rangeOrder = function (a, b) {
+    if (!a && !b) return { start: '', end: '' };
+    if (!a) return { start: b, end: b };
+    if (!b) return { start: a, end: a };
+    return a <= b ? { start: a, end: b } : { start: b, end: a };
+  };
+  Core.isoMD = function (isoStr) {
+    var d = Core.parse(isoStr);
+    if (!d) return '';
+    return (d.getMonth() + 1) + '.' + d.getDate();
+  };
+  Core.isoMDwd = function (isoStr) {
+    var d = Core.parse(isoStr);
+    if (!d) return '';
+    return (d.getMonth() + 1) + '.' + d.getDate() + ' (' + WD[d.getDay()] + ')';
+  };
+  Core.stayLabel = function (start, end) {
+    if (!Core.isISODate(start)) return '';
+    var n = Math.max(0, Core.diffDays(start, Core.isISODate(end) ? end : start));
+    return n === 0 ? '당일치기' : n + '박 ' + (n + 1) + '일';
+  };
+  /** 달력 요약용: '12.5 (토) ~ 12.8 (화) · 3박 4일' */
+  Core.rangeSummary = function (start, end) {
+    if (!Core.isISODate(start)) return '';
+    var e = Core.isISODate(end) ? end : start;
+    var a = Core.isoMDwd(start);
+    return (e === start ? a : a + ' ~ ' + Core.isoMDwd(e)) + ' · ' + Core.stayLabel(start, e);
+  };
+  /** 여행 기간 상한(60일) 검사: {ok, days, error} */
+  Core.checkRange = function (start, end) {
+    if (!Core.isISODate(start) || !Core.isISODate(end)) return { ok: false, days: 0, error: '날짜를 다시 골라 주세요' };
+    var r = Core.rangeOrder(start, end);
+    var days = Core.diffDays(r.start, r.end) + 1;
+    if (days > 60) return { ok: false, days: days, error: '여행 기간은 60일까지 정할 수 있어요' };
+    return { ok: true, days: days, start: r.start, end: r.end, error: '' };
   };
 
   /* --------------------------------------------------------- categories */
