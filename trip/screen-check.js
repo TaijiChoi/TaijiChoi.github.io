@@ -48,8 +48,10 @@
         var who = Store.memberName(trip, it.assigneeId);
         return '<div class="chk' + (it.done ? ' done' : '') + '">' +
           '<button class="box" data-action="toggle-check" data-id="' + UI.esc(it.id) + '" aria-label="체크">' + UI.icon('check', 14) + '</button>' +
-          '<span class="tx" data-action="edit-check" data-id="' + UI.esc(it.id) + '">' + UI.esc(it.text) + '</span>' +
-          (who ? '<span class="who" data-action="edit-check" data-id="' + UI.esc(it.id) + '">' + UI.avatar(who, 'xs') + '</span>' : '<span class="who tiny muted" data-action="edit-check" data-id="' + UI.esc(it.id) + '">담당</span>') +
+          '<button class="chk-main" data-action="edit-check" data-id="' + UI.esc(it.id) + '" aria-label="' + UI.esc(it.text) + ' 수정">' +
+            '<span class="tx">' + UI.esc(it.text) + '</span>' +
+            (who ? '<span class="who">' + UI.avatar(who, 'xs') + '</span>' : '<span class="who tiny muted">담당</span>') +
+          '</button>' +
           '<button class="icon-btn sm" data-action="del-check" data-id="' + UI.esc(it.id) + '" aria-label="삭제">' + UI.icon('trash', 16) + '</button>' +
         '</div>';
       }).join('') + '</div>';

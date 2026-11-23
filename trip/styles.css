@@ -334,7 +334,8 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 .chk .box svg{width:14px;height:14px;color:#fff;opacity:0}
 .chk.done .box{background:var(--mint);border-color:var(--mint)}
 .chk.done .box svg{opacity:1}
-.chk .tx{flex:1;min-width:0;font-size:14px;font-weight:600;letter-spacing:-.2px;word-break:keep-all}
+.chk .tx{flex:1;min-width:0;font-size:14px;font-weight:600;letter-spacing:-.2px;word-break:keep-all;text-align:left}
+.chk-main{flex:1;min-width:0;display:flex;align-items:center;gap:9px;background:none;border:0;padding:0;text-align:left}
 .chk.done .tx{color:var(--sub-2);text-decoration:line-through}
 .chk .who{flex:none}
 
