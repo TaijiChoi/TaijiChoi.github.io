@@ -18,7 +18,7 @@
 (function () {
   'use strict';
   function ready(f) {
-    try { var w = f.contentWindow; return !!(w && w.TL && w.TL.Store && w.document.getElementById('screen') && w.TL.Store.trip); } catch (e) { return false; }
+    try { var w = f.contentWindow; return !!(w && w.TL && w.TL.Store && w.TL.App && w.TL.App.openTrip && w.document.getElementById('screen')); } catch (e) { return false; }
   }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   async function waitReady(f) {
