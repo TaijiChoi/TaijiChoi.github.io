@@ -236,9 +236,9 @@
     };
   };
   Store.setNickname = function (name) { state.nickname = (name || '').trim(); notify(); };
-  /** 내 Firebase 설정 저장. null(또는 빈 값)이면 기본 내장 설정으로 되돌린다. */
+  /** 내 Firebase 설정 저장. null(또는 쓸 수 없는 값)이면 기본 내장 설정으로 되돌린다. */
   Store.setFirebase = function (cfg) {
-    var next = cfg && typeof cfg === 'object' ? Object.assign({}, cfg) : null;
+    var next = (cfg && typeof cfg === 'object' && cfg.projectId) ? Object.assign({}, cfg) : null;
     var changed = fbKey(state.firebase) !== fbKey(next);
     state.firebase = next;
     if (changed) resetFb();
