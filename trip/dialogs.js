@@ -1124,7 +1124,8 @@
     var base = location.origin + location.pathname.replace(/[^/]*$/, '');
     var code = trip.remoteCode;
     var q = '?trip=' + encodeURIComponent(code);
-    var cfg = Store.firebaseConfig();
+    // 내 Firebase로 바꾼 경우에만 설정을 링크에 담는다 (기본 프로젝트는 앱에 들어 있어 필요 없음)
+    var cfg = Store.customFirebase();
     if (cfg) q += '&cfg=' + b64url(JSON.stringify(cfg));
     return base + q;
   }
@@ -1145,7 +1146,7 @@
         UI.icon('copy', 18) + '코드 복사</button>' +
         '<button class="btn btn-primary" data-action="share-link">' + UI.icon('share', 18) + '링크 보내기</button></div>';
       html += '<div class="note mt12">링크를 받은 일행은 앱을 설치하지 않아도 브라우저에서 바로 열 수 있어요. ' +
-        '링크에 Firebase 설정이 함께 담겨 있어서 따로 설정할 필요가 없습니다.</div>';
+        '필요한 설정이 앱에 들어 있어서 일행은 아무것도 설정하지 않아도 됩니다.</div>';
       html += '<div class="kv mt12"><span class="k">참여 중인 일행</span><span class="v">' +
         (trip.members || []).map(function (m) { return UI.esc(m.name); }).join(' · ') + '</span></div>';
       html += '<div class="btn-row mt12"><button class="btn btn-ghost" data-action="manage-members">' +
@@ -1154,10 +1155,11 @@
     } else {
       var cfgOk = !!Store.firebaseConfig();
       html += '<div class="note">지금은 <b>이 기기에만 저장</b>되는 상태예요. 일행과 실시간으로 함께 쓰려면 ' +
-        '무료 Firebase 저장소를 연결하면 됩니다. 설정 방법은 1분이면 끝나요.</div>';
+        '실시간 공유를 켜면 됩니다. Firebase는 이미 연결되어 있어 따로 설정할 것이 없어요.</div>';
       html += '<div class="card flat mt12" style="border:1px solid var(--line);padding:2px 14px">' +
         '<div class="kv"><span class="k">현재 모드</span><span class="v">로컬 저장</span></div>' +
-        '<div class="kv"><span class="k">Firebase 설정</span><span class="v">' + (cfgOk ? '입력됨' : '없음') + '</span></div>' +
+        '<div class="kv"><span class="k">Firebase</span><span class="v">' +
+          (cfgOk ? (Store.isDefaultFirebase() ? '기본 프로젝트 연결됨' : '내 설정 연결됨') : '없음') + '</span></div>' +
       '</div>';
       html += '<div class="btn-row mt12"><button class="btn btn-ghost" data-action="manage-members">' +
         UI.icon('users', 18) + '일행 관리</button></div>';
@@ -1236,6 +1238,7 @@
     trip = trip || TL.App.currentTrip();
     var s = Store.settings();
     var cfg = s.firebase;
+    var custom = !!s.firebaseCustom;
     var signed = !!(TL.Auth && TL.Auth.signedIn());
     var html = '';
     html += '<div class="form-row"><label class="fl">내 이름 (닉네임)</label>' +
@@ -1259,38 +1262,39 @@
       '</ol></div></details>';
 
     html += '<div class="section-title" style="margin-top:20px"><h2>일행과 실시간 공유</h2>' +
-      '<span class="pill ' + (cfg ? 'mint' : 'gray') + '">' + (cfg ? '설정됨' : '미설정') + '</span></div>';
-    html += '<div class="note">GitHub Pages는 저장소가 없어서, <b>무료 Firebase Firestore</b>를 저장소로 씁니다. ' +
-      '한 번만 설정하면 일행 누구나 링크만 열어 함께 편집할 수 있어요.</div>';
+      '<span class="pill ' + (cfg ? 'mint' : 'gray') + '">' + (cfg ? (custom ? '내 설정' : '기본 연결') : '미설정') + '</span></div>';
+    html += '<div class="note">여행 데이터는 <b>무료 Firebase Firestore</b>에 저장되어 일행과 실시간으로 함께 쓸 수 있어요. ' +
+      (custom
+        ? '지금은 <b>내 Firebase 프로젝트</b>에 연결되어 있어요.'
+        : '지금은 기본 프로젝트 <b>' + UI.esc((cfg && cfg.projectId) || '') + '</b>이(가) 앱에 들어 있어서, 따로 설정하지 않아도 바로 로그인·실시간 공유를 쓸 수 있어요.') +
+      '</div>';
 
-    if (!cfg) {
-      html += '<div class="note mt8"><b>1분 설정 순서</b><ol>' +
-        '<li><a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a> → <b>프로젝트 추가</b> (이름 아무거나, 애널리틱스는 꺼도 됨)</li>' +
-        '<li>왼쪽 <b>Build › Firestore Database</b> → <b>데이터베이스 만들기</b> → 위치 <b>asia-northeast3(서울)</b> → <b>프로덕션 모드로 시작</b></li>' +
-        '<li>프로젝트 설정(⚙) › <b>내 앱</b> › 웹 <b>&lt;/&gt;</b> 추가 → <b>firebaseConfig</b> 복사</li>' +
-        '<li><b>Build › Authentication</b> → 시작하기 → <b>Google</b>·<b>Email/Password</b> 사용 설정, <b>승인된 도메인</b>에 <b>taijichoi.github.io</b> 추가 (로그인)</li>' +
-        '<li>Firestore <b>규칙</b> 탭에 아래 규칙을 붙여넣고 <b>게시</b> (공유 + 로그인 계정)</li>' +
-        '<li>복사한 설정을 아래에 붙여넣고 <b>저장</b></li>' +
-      '</ol></div>';
-      html += '<div class="code-box light" id="rules">' + UI.esc(D.RULES) + '</div>' +
-        '<button class="btn btn-ghost sm mt8" data-action="copy-rules" style="width:100%">규칙 복사</button>';
-      html += '<div class="form-row mt12"><label class="fl">firebaseConfig 붙여넣기</label>' +
-        '<textarea class="input" id="f_fb" placeholder="여기에 firebaseConfig를 붙여넣으세요" style="min-height:116px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px"></textarea>' +
-        '<div class="hintline">따옴표·중괄호까지 그대로 붙여넣으면 됩니다. (또는 apiKey / projectId / appId 세 줄만 입력)</div>' +
-        '<button class="btn btn-mint mt8" data-action="save-fb">저장하고 연결 테스트</button></div>';
-    } else {
+    if (cfg) {
       html += '<div class="card flat mt8" style="border:1px solid var(--line);padding:2px 14px">' +
         '<div class="kv"><span class="k">프로젝트</span><span class="v">' + UI.esc(cfg.projectId || '-') + '</span></div>' +
-        '<div class="kv"><span class="k">App ID</span><span class="v">' + UI.esc(cfg.appId || '(없음)') + '</span></div>' +
+        '<div class="kv"><span class="k">연결 방식</span><span class="v">' + (custom ? '내 설정' : '기본 내장') + '</span></div>' +
+        '<div class="kv"><span class="k">App ID</span><span class="v" style="max-width:62%;overflow-wrap:anywhere;text-align:right">' + UI.esc(cfg.appId || '(없음)') + '</span></div>' +
         '<div class="kv"><span class="k">상태</span><span class="v" id="fb-status">연결 테스트 전</span></div>' +
       '</div>' +
       '<div class="btn-row mt8">' +
         '<button class="btn btn-ghost sm" data-action="test-fb" style="flex:1">연결 테스트</button>' +
-        '<button class="btn btn-ghost sm" data-action="remove-fb" style="flex:1">설정 지우기</button>' +
+        (custom ? '<button class="btn btn-ghost sm" data-action="reset-fb" style="flex:1">기본값으로 되돌리기</button>' : '') +
       '</div>' +
-      '<details class="mt12"><summary class="tiny muted" style="cursor:pointer">설정 다시 입력하기</summary>' +
-        '<div class="form-row mt8"><textarea class="input" id="f_fb" placeholder="firebaseConfig JSON" style="min-height:110px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px"></textarea>' +
-        '<button class="btn btn-ghost mt8" data-action="save-fb">새 설정으로 저장</button></div></details>';
+      (custom ? '' : '<div class="hintline">기본 프로젝트는 트립로그 사용자가 함께 쓰는 공유 저장소예요. 내 Firebase로 바꾸면 내 데이터만 따로 관리할 수 있어요.</div>') +
+      '<details class="mt12"><summary class="tiny muted" style="cursor:pointer">' + (custom ? '설정 다시 입력하기 / 내 프로젝트 안내' : '내 Firebase 프로젝트로 바꾸기') + '</summary>' +
+        '<div class="form-row mt8"><label class="fl">firebaseConfig</label>' +
+        '<textarea class="input" id="f_fb" style="min-height:150px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">' + UI.esc(JSON.stringify(cfg, null, 2)) + '</textarea>' +
+        '<div class="hintline">지금 쓰는 설정이 채워져 있어요. Firebase 콘솔 › 프로젝트 설정 › 내 앱 › 웹의 firebaseConfig로 바꾸면 내 프로젝트로 연결됩니다.</div>' +
+        '<button class="btn btn-mint mt8" data-action="save-fb">저장하고 연결 테스트</button></div>' +
+        '<div class="note mt8"><b>내 프로젝트를 쓸 때 (한 번만)</b><ol>' +
+        '<li><a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a> → <b>프로젝트 추가</b> (애널리틱스는 꺼도 됨)</li>' +
+        '<li><b>Build › Firestore Database</b> → <b>데이터베이스 만들기</b> → 위치 <b>asia-northeast3(서울)</b> → 프로덕션 모드</li>' +
+        '<li><b>Build › Authentication</b> → 시작하기 → <b>Google</b>·<b>Email/Password</b> 사용 설정, <b>Settings › 승인된 도메인</b>에 <b>taijichoi.github.io</b> 추가 (로그인)</li>' +
+        '<li>Firestore <b>규칙</b> 탭에 아래 규칙을 붙여넣고 <b>게시</b> (공유 + 로그인 계정)</li>' +
+        '<li>복사한 설정을 위 칸에 붙여넣고 <b>저장하고 연결 테스트</b></li>' +
+        '</ol></div>' +
+        '<div class="code-box light" id="rules">' + UI.esc(D.RULES) + '</div>' +
+        '<button class="btn btn-ghost sm mt8" data-action="copy-rules" style="width:100%">규칙 복사</button></details>';
     }
 
     html += '<div class="section-title" style="margin-top:22px"><h2>환율 (참고값)</h2></div>' +
@@ -1355,14 +1359,14 @@
     if (!cfg.apiKey) { UI.toast('apiKey가 없어요. 설정 전체를 붙여넣어 주세요'); return; }
     UI.toast('연결을 확인하는 중…');
     Store.testFirebase(cfg).then(function () {
-      Store.setFirebase(cfg);
+      Store.setFirebase(Store.isDefaultConfig(cfg) ? null : cfg);
       if (TL.Auth) { TL.Auth.reset(); TL.Auth.init(); }
       D.settings(TL.App.currentTrip());
-      UI.toast('연결됐어요! 이제 설정에서 로그인하거나 여행에서 공유를 켜세요');
+      UI.toast(Store.isDefaultFirebase() ? '기본 프로젝트로 연결됐어요' : '내 Firebase 프로젝트로 연결됐어요', 3000);
     }).catch(function (e) {
-      Store.setFirebase(cfg);
+      Store.setFirebase(Store.isDefaultConfig(cfg) ? null : cfg);
       if (TL.Auth) { TL.Auth.reset(); TL.Auth.init(); }
-      UI.toast('저장은 했지만 테스트 실패: ' + (e.code || e.message || e));
+      UI.toast('저장은 했지만 테스트 실패: ' + (e.code || e.message || e), 3600);
       D.settings(TL.App.currentTrip());
     });
   };
@@ -1379,15 +1383,16 @@
       UI.toast('연결 실패 — 규칙/DB 생성을 확인해 주세요');
     });
   };
-  A['remove-fb'] = function () {
-    if (!confirm('Firebase 설정을 지울까요? 실시간 공유와 로그인이 끊기고 로컬 저장으로 돌아갑니다.')) return;
+  A['reset-fb'] = function () {
+    if (!Store.isDefaultFirebase() && !confirm('내 Firebase 설정을 지우고 기본 프로젝트로 되돌릴까요? 여행 데이터는 그대로예요.')) return;
     if (TL.Account) TL.Account.stop();
     Store.setFirebase(null);
     Store.disconnect();
-    if (TL.Auth) TL.Auth.reset();
+    if (TL.Auth) { TL.Auth.reset(); TL.Auth.init(); }
     D.settings(TL.App.currentTrip());
-    UI.toast('설정을 지웠어요');
+    UI.toast('기본 프로젝트로 되돌렸어요');
   };
+  A['remove-fb'] = A['reset-fb'];
   A['save-rates'] = function () {
     ['JPY', 'USD', 'EUR', 'THB', 'VND'].forEach(function (code) {
       var v = Core.num(UI.val('rate_' + code), 0);

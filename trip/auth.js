@@ -143,7 +143,9 @@
       appMod = mods[0];
       fbMod = mods[1];
       var app;
-      try { app = appMod.getApp('triplog'); } catch (e) { app = appMod.initializeApp(cfg, 'triplog'); }
+      // Firestore와 같은 앱(프로젝트별 이름)을 써서 설정을 바꾸면 새 프로젝트로 붙는다
+      var appName = (TL.Store && TL.Store.fbAppName) ? TL.Store.fbAppName() : 'triplog';
+      try { app = appMod.getApp(appName); } catch (e) { app = appMod.initializeApp(cfg, appName); }
       try { auth = fbMod.getAuth(app); }
       catch (e) { auth = fbMod.initializeAuth(app, { persistence: fbMod.browserLocalPersistence }); }
       try {

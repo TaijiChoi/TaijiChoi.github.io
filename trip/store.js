@@ -13,10 +13,24 @@
   var FB_BASE = 'https://www.gstatic.com/firebasejs/' + FB_VERSION + '/';
   var COLLS = ['schedules', 'expenses', 'checklist', 'reservations'];
 
+  /* 기본 내장 Firebase 프로젝트 (triplog-c4921).
+     기기에 저장된 내 설정이 없으면 이 값으로 바로 로그인·실시간 공유를 쓴다.
+     apiKey는 Firebase 웹 앱에서 공개되는 값이고, 실제 접근은 Firestore 규칙이 막는다. */
+  var DEFAULT_FIREBASE = {
+    apiKey: 'AIzaSyB2l8IQ6IFb_Dz-pLlfOXeNW6NDY_vJMj',
+    authDomain: 'triplog-c4921.firebaseapp.com',
+    projectId: 'triplog-c4921',
+    storageBucket: 'triplog-c4921.firebasestorage.app',
+    messagingSenderId: '83063596223',
+    appId: '1:83063596223:web:049fd16faf118ad55b120a',
+    measurementId: 'G-68X0HJ92GN'
+  };
+
   var listeners = [];
   var app = null;          // firebase app
   var fs = null;           // firestore module
   var db = null;
+  var loadedKey = '';      // 지금 db가 붙어 있는 설정(projectId|apiKey)
   var conn = null;         // {code, unsubs:[], tripId}
   var lastError = '';
 
@@ -36,6 +50,28 @@
   }
   var state = load();
 
+  /** 지금 쓸 Firebase 설정: 내 설정(state.firebase)이 있으면 그것, 없으면 기본 내장값 */
+  function cfgOf(cfg) { return cfg || state.firebase || DEFAULT_FIREBASE; }
+  /** 기본 내장 프로젝트와 같은 설정인가 (같으면 내 설정으로 저장하지 않는다) */
+  function sameAsDefault(cfg) {
+    return !!cfg && cfg.projectId === DEFAULT_FIREBASE.projectId && cfg.apiKey === DEFAULT_FIREBASE.apiKey;
+  }
+  /** 같은 프로젝트인지 비교할 열쇠 */
+  function fbKey(cfg) {
+    var c = cfgOf(cfg);
+    return String(c.projectId || '') + '|' + String(c.apiKey || '');
+  }
+  /** Firebase 앱 이름 — 프로젝트마다 달라야 설정을 바꿨을 때 새 프로젝트로 붙는다 */
+  function appNameOf(cfg) { return 'triplog-' + String(cfgOf(cfg).projectId || 'default'); }
+  Store.DEFAULT_FIREBASE = DEFAULT_FIREBASE;
+  Store.isDefaultConfig = sameAsDefault;
+  Store.fbAppName = function () { return appNameOf(null); };
+  /** Firebase 런타임(app·Firestore 인스턴스)을 놓아 준다 — 설정을 바꾸면 다음 연결 때 새로 붙는다 */
+  function resetFb() {
+    try { closeConn(); } catch (e) {}
+    app = null; fs = null; db = null; loadedKey = ''; lastError = '';
+  }
+
   function load() {
     try {
       var raw = root.localStorage && root.localStorage.getItem(KEY);
@@ -43,6 +79,8 @@
       var parsed = JSON.parse(raw);
       var s = Object.assign(blank(), parsed || {});
       if (!Array.isArray(s.trips)) s.trips = [];
+      // 예전에 같은 프로젝트를 직접 저장해 둔 경우에는 내 설정이 아닌 기본값으로 본다
+      if (sameAsDefault(s.firebase)) s.firebase = null;
       if (!s.meByTrip || typeof s.meByTrip !== 'object' || Array.isArray(s.meByTrip)) s.meByTrip = {};
       if (!s.ratesCache || typeof s.ratesCache !== 'object') s.ratesCache = { fetchedAt: 0, rates: {} };
       if (!s.ratesCache.rates || typeof s.ratesCache.rates !== 'object') s.ratesCache.rates = {};
@@ -126,7 +164,7 @@
 
   /** 로그인 상태에서 만든 여행은 계정에 남겨 다른 기기에서도 열 수 있게 실시간 방을 만든다 (실패하면 로컬로 남는다) */
   function maybeAutoShare(trip) {
-    if (!trip || !state.firebase) return;
+    if (!trip || !Store.firebaseConfig()) return;
     var signed = false;
     try { signed = !!(TL.Auth && TL.Auth.signedIn()); } catch (e) {}
     if (!signed) return;
@@ -192,13 +230,25 @@
     var s = state;
     return {
       nickname: s.nickname || '',
-      firebase: s.firebase || null,
+      firebase: cfgOf(null),
+      firebaseCustom: !!s.firebase,
       defaultRates: Object.assign({}, Core.DEFAULT_RATES, s.defaultRates || {})
     };
   };
   Store.setNickname = function (name) { state.nickname = (name || '').trim(); notify(); };
-  Store.setFirebase = function (cfg) { state.firebase = cfg || null; notify(); };
-  Store.firebaseConfig = function () { return state.firebase || null; };
+  /** 내 Firebase 설정 저장. null(또는 빈 값)이면 기본 내장 설정으로 되돌린다. */
+  Store.setFirebase = function (cfg) {
+    var next = cfg && typeof cfg === 'object' ? Object.assign({}, cfg) : null;
+    var changed = fbKey(state.firebase) !== fbKey(next);
+    state.firebase = next;
+    if (changed) resetFb();
+    notify();
+  };
+  /** 지금 실제로 쓰는 설정(기본 내장 포함) */
+  Store.firebaseConfig = function () { return cfgOf(null); };
+  /** 기기에 저장된 내 설정만 (없으면 null) */
+  Store.customFirebase = function () { return state.firebase || null; };
+  Store.isDefaultFirebase = function () { return !state.firebase; };
   Store.setDefaultRate = function (code, rate) {
     var r = Number(rate);
     if (!isFinite(r) || r <= 0) return;
@@ -575,16 +625,18 @@
   }
   Store.withTimeout = withTimeout;
 
-  function loadFb() {
-    if (fs) return Promise.resolve(fs);
+  function loadFb(cfgOverride) {
+    var cfg = cfgOf(cfgOverride);
+    if (!cfg) throw new Error('Firebase 설정이 없습니다. 설정에서 먼저 입력해 주세요.');
+    var key = fbKey(cfg);
+    if (fs && db && loadedKey === key) return Promise.resolve(fs);
     return withTimeout(Promise.all([
       import(FB_BASE + 'firebase-app.js'),
       import(FB_BASE + 'firebase-firestore.js')
     ]), 15000, 'Firebase 라이브러리를 불러오지 못했어요. 네트워크를 확인해 주세요.').then(function (mods) {
       var appMod = mods[0], fsMod = mods[1];
-      var cfg = state.firebase;
-      if (!cfg) throw new Error('Firebase 설정이 없습니다. 설정에서 먼저 입력해 주세요.');
-      try { app = appMod.getApp('triplog'); } catch (e) { app = appMod.initializeApp(cfg, 'triplog'); }
+      var name = appNameOf(cfg);
+      try { app = appMod.getApp(name); } catch (e) { app = appMod.initializeApp(cfg, name); }
       // 오프라인 지속성(IndexedDB) — 지원하지 않거나 이미 초기화된 경우에는 일반 모드로
       try {
         if (typeof fsMod.initializeFirestore === 'function' && typeof fsMod.persistentLocalCache === 'function') {
@@ -599,6 +651,7 @@
         db = fsMod.getFirestore(app);
       }
       fs = fsMod;
+      loadedKey = key;
       return fs;
     });
   }
@@ -606,18 +659,21 @@
   /** 다른 모듈(계정 동기화)이 같은 Firestore 인스턴스를 쓸 수 있게 열어 준다 */
   Store.fsdb = function () { return { fs: fs, db: db }; };
 
-  /** Firebase 설정 유효성 확인용: 연결 테스트 */
+  /** Firebase 설정 유효성 확인용: 연결 테스트 (지금 쓰는 인스턴스는 그대로 두고 임시로 붙여 본다) */
   Store.testFirebase = function (cfg) {
-    var prev = state.firebase;
-    state.firebase = cfg;
-    app = null; fs = null; db = null;
-    return loadFb().then(function (fsMod) {
+    var use = cfgOf(cfg);
+    if (!use) return Promise.reject(new Error('Firebase 설정이 없습니다. 설정에서 먼저 입력해 주세요.'));
+    var prev = { app: app, fs: fs, db: db, key: loadedKey };
+    app = null; fs = null; db = null; loadedKey = '';
+    return loadFb(use).then(function (fsMod) {
       var ref = fsMod.doc(db, 'triplog_meta', 'ping');
       return withTimeout(fsMod.getDoc(ref), 10000, 'Firestore 응답이 없어요. 데이터베이스 생성 여부와 네트워크를 확인해 주세요.')
-        .then(function () { return true; });
+        .then(function () {
+          app = prev.app; fs = prev.fs; db = prev.db; loadedKey = prev.key;
+          return true;
+        });
     }).catch(function (e) {
-      state.firebase = prev;
-      app = null; fs = null; db = null;
+      app = prev.app; fs = prev.fs; db = prev.db; loadedKey = prev.key;
       throw e;
     });
   };
@@ -627,7 +683,7 @@
     opts = opts || {};
     var trip = Store.trip(tripId);
     if (!trip) return Promise.reject(new Error('여행을 찾을 수 없습니다.'));
-    if (!state.firebase) return Promise.reject(new Error('설정에서 Firebase 정보를 먼저 입력해 주세요.'));
+    if (!Store.firebaseConfig()) return Promise.reject(new Error('설정에서 Firebase 정보를 먼저 입력해 주세요.'));
     return loadFb().then(function (fsMod) {
       var code = opts.code || trip.remoteCode || Core.inviteCode();
       trip.remoteCode = code;
@@ -773,7 +829,7 @@
   }
 
   /* 테스트 전용: 실제 Firebase 없이 원격 쓰기 경로를 검사할 때 가짜 모듈을 끼워 넣는다 */
-  Store.testInjectRemote = function (fsMod, dbStub) { fs = fsMod || null; db = dbStub || null; };
+  Store.testInjectRemote = function (fsMod, dbStub) { fs = fsMod || null; db = dbStub || null; loadedKey = (fs && db) ? fbKey(null) : ''; };
   Store.testInjectConn = function (tripId, code, ready) {
     var trip = Store.trip(tripId);
     if (!trip) return;
@@ -988,8 +1044,9 @@
     return added.length;
   };
   Store.clearAll = function () {
+    var key = fbKey(state.firebase);
     state = blank();
-    closeConn();
+    if (key !== fbKey(null)) resetFb(); else closeConn();
     notify();
   };
   Store.loadSample = function () {
@@ -1013,7 +1070,10 @@
     if (cfgRaw) {
       try {
         var json = JSON.parse(Core.b64urlDecode(cfgRaw));
-        if (json && json.projectId) state.firebase = json;
+        if (json && json.projectId) {
+          // 링크에 담긴 설정이 기본 프로젝트와 같으면 내 설정으로 저장하지 않는다
+          state.firebase = Store.isDefaultConfig(json) ? null : json;
+        }
       } catch (e) { /* 무시 */ }
     }
     var code = (q.get('trip') || '').trim().toUpperCase();
