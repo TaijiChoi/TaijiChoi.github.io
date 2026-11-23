@@ -99,6 +99,8 @@
   Store.isRemote = function (trip) { return !!(trip && trip.remoteCode); };
 
   Store.createTrip = function (input) {
+    var meName = '';
+    try { if (TL.Auth && TL.Auth.signedIn()) meName = TL.Auth.displayName(); } catch (e) {}
     var trip = {
       id: Core.uid('trip'),
       name: (input.name || '새 여행').trim(),
@@ -113,12 +115,29 @@
       createdAt: new Date().toISOString(),
       data: { schedules: [], expenses: [], checklist: [], reservations: [] }
     };
-    if (!trip.members.length) trip.members = [{ id: Core.uid('m'), name: state.nickname || '나' }];
+    if (!trip.members.length) trip.members = [{ id: Core.uid('m'), name: state.nickname || meName || '나' }];
+    try { if (TL.Auth && TL.Auth.uid()) trip.ownerUid = TL.Auth.uid(); } catch (e) {}
     state.trips.push(trip);
     state.currentTripId = trip.id;
     notify();
+    maybeAutoShare(trip);
     return trip;
   };
+
+  /** 로그인 상태에서 만든 여행은 계정에 남겨 다른 기기에서도 열 수 있게 실시간 방을 만든다 (실패하면 로컬로 남는다) */
+  function maybeAutoShare(trip) {
+    if (!trip || !state.firebase) return;
+    var signed = false;
+    try { signed = !!(TL.Auth && TL.Auth.signedIn()); } catch (e) {}
+    if (!signed) return;
+    setTimeout(function () {
+      var t = Store.trip(trip.id);
+      if (!t || t.remoteCode) return;
+      Store.connect(t.id, { create: true }).then(function () {
+        if (TL.Account) TL.Account.onTrip(Store.trip(t.id));
+      }).catch(function () { /* 오프라인·규칙 오류 → 로컬 유지 */ });
+    }, 0);
+  }
 
   Store.updateTrip = function (id, patch) {
     var trip = Store.trip(id);
@@ -131,6 +150,7 @@
     trip.updatedAt = new Date().toISOString();
     var metaKeys = Object.keys(patch);
     if (metaKeys.length) pushMeta(trip, metaKeys);
+    if (metaKeys.length && TL.Account) TL.Account.touch(trip);
     notify();
     return trip;
   };
@@ -217,6 +237,11 @@
     var nick = state.nickname;
     if (nick) {
       for (var i = 0; i < ms.length; i++) if (ms[i].name === nick) return ms[i].id;
+    }
+    var acct = '';
+    try { if (TL.Auth && TL.Auth.signedIn()) acct = TL.Auth.displayName(); } catch (e) {}
+    if (acct && acct !== nick) {
+      for (var j = 0; j < ms.length; j++) if (ms[j].name === acct) return ms[j].id;
     }
     return fallback || (ms[0] && ms[0].id) || '';
   };
@@ -578,6 +603,8 @@
     });
   }
   Store.loadFb = loadFb;
+  /** 다른 모듈(계정 동기화)이 같은 Firestore 인스턴스를 쓸 수 있게 열어 준다 */
+  Store.fsdb = function () { return { fs: fs, db: db }; };
 
   /** Firebase 설정 유효성 확인용: 연결 테스트 */
   Store.testFirebase = function (cfg) {
@@ -610,6 +637,7 @@
 
       var metaRef = fsMod.doc(db, 'trips', code);
       var settled = false;
+      var linkedOnce = false;
 
       return new Promise(function (resolve, reject) {
         function done(err) {
@@ -641,6 +669,10 @@
           trip.rates = m.rates || trip.rates;
           trip.remote = true;
           if (conn) conn.metaReady = true;
+          if (!linkedOnce) {
+            linkedOnce = true;
+            if (TL.Account) TL.Account.onTrip(trip);   // 로그인 상태면 계정 여행 목록에도 남긴다
+          }
           notify();
           done();
         }, function (e) {
@@ -752,11 +784,12 @@
   };
 
   /* ----------------------------------------------------- join / create */
-  /** 초대 코드로 참여: 로컬에 여행 자리를 만들고 구독한다. */
-  Store.joinByCode = function (code, nickname) {
+  /** 초대 코드로 참여: 로컬에 여행 자리를 만들고 구독한다. opts.silent면 화면 전환·닉네임 변경 없이 목록에만 더한다. */
+  Store.joinByCode = function (code, nickname, opts) {
+    opts = opts || {};
     code = String(code || '').trim().toUpperCase();
     if (!/^[A-Z0-9]{4,10}$/.test(code)) return Promise.reject(new Error('초대 코드는 영문·숫자 6자리입니다.'));
-    if (nickname) Store.setNickname(nickname);
+    if (nickname && !opts.silent) Store.setNickname(nickname);
     var existing = null;
     state.trips.forEach(function (t) { if (t.remoteCode === code) existing = t; });
     var trip = existing || {
@@ -774,7 +807,7 @@
     };
     if (!existing) state.trips.push(trip);
     var prevCurrent = state.currentTripId;
-    state.currentTripId = trip.id;
+    if (!opts.silent) state.currentTripId = trip.id;
     notify();
     return Store.connect(trip.id, { code: code }).then(function () {
       // 일행 목록에 내가 있는지는 사용자가 직접 고른다 (Dialogs.whoAmI)

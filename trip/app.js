@@ -386,6 +386,14 @@
     booted = true;
     App.view.mapSource = readMapSource();
     Store.setOnline(navigator.onLine !== false);
+    // 계정 로그인: Firebase 설정이 있을 때만 조용히 시작한다 (게스트 상태는 그대로)
+    try {
+      if (TL.Auth) TL.Auth.init();
+      if (TL.Account) {
+        TL.Account.init();
+        TL.Account.onChange(function () { render(); });
+      }
+    } catch (e) { console.warn('[triplog] auth', e); }
     var code = Store.bootRemoteFromURL(location.search);
     var initial = parse();
 

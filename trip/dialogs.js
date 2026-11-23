@@ -960,6 +960,164 @@
     UI.toast('정리했어요');
   };
 
+  /* ============================================================== 계정 */
+  function authMsg(text, kind) {
+    var el = document.getElementById('auth-msg');
+    if (!el) { if (text && kind === 'err') UI.toast(text, 3200); return; }
+    el.textContent = text || '';
+    el.className = 'auth-msg' + (kind ? ' ' + kind : '');
+  }
+  function validEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim()); }
+  function afterSignIn() {
+    UI.close();
+    if (TL.App && TL.App.render) TL.App.render();
+    var name = TL.Auth.displayName();
+    UI.toast(name + '님, 로그인했어요 · 여행 목록을 맞추는 중', 2800);
+    setTimeout(function () {
+      var st = TL.Account ? TL.Account.status() : null;
+      if (st && st.localOnly > 0) D.merge();
+    }, 1200);
+  }
+
+  D.account = function () {
+    var signed = !!(TL.Auth && TL.Auth.signedIn());
+    var cfg = Store.firebaseConfig();
+    var st = TL.Account ? TL.Account.status() : { docCount: 0, localOnly: 0, remoteCount: 0, error: '', syncing: false };
+    var html = '';
+    if (signed) {
+      var name = TL.Auth.displayName();
+      var email = TL.Auth.email();
+      html += '<div class="acct-card">' + UI.avatar(name, 'lg') +
+        '<div class="acct-id"><b>' + UI.esc(name) + '</b><small>' + UI.esc(email || '이메일 없음') + '</small>' +
+        (st.syncing ? '<small class="sync-line">동기화 중…</small>' : '<small class="sync-line ok">계정과 연결됨</small>') + '</div></div>';
+      html += '<div class="card flat mt12" style="border:1px solid var(--line);padding:2px 14px">' +
+        '<div class="kv"><span class="k">계정에 저장된 여행</span><span class="v">' + st.docCount + '개</span></div>' +
+        '<div class="kv"><span class="k">이 기기 여행</span><span class="v">' + Store.trips().length + '개' +
+          (st.remoteCount ? ' · 공유 ' + st.remoteCount + '개' : '') + '</span></div>' +
+        '</div>';
+      if (st.error) html += '<div class="auth-msg err">동기화 문제: ' + UI.esc(st.error) + '</div>';
+      html += '<div class="btn-row mt12"><button class="btn btn-ghost" data-action="auth-sync">' + UI.icon('swap', 17) +
+        (st.syncing ? '동기화 중…' : '지금 동기화') + '</button></div>';
+      if (st.localOnly > 0) {
+        html += '<div class="note mt12">이 기기에만 있는 여행이 <b>' + st.localOnly + '개</b> 있어요. 계정에 연결하면 다른 기기에서도 열 수 있어요.</div>' +
+          '<button class="btn btn-mint mt8" data-action="acct-merge" style="width:100%">' + UI.icon('upload', 17) + '이 기기 여행 계정에 연결</button>';
+      }
+      html += '<div class="hintline">로그인 상태에서 만든 여행은 다른 기기에서도 열 수 있도록 자동으로 공유 방(초대 코드)이 만들어져 계정에 저장됩니다.</div>';
+      html += '<div class="hintline">로그인한 계정 이름은 결제자·정산의 ‘나’ 기본값으로도 쓰여요.</div>';
+      html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">닫기</button>' +
+        '<button class="btn btn-ghost" data-action="auth-signout">로그아웃</button></div>';
+    } else {
+      html += '<div class="note">로그인하면 <b>내 여행 목록이 계정에 저장</b>돼 다른 기기에서도 그대로 열려요. ' +
+        '로그인하지 않아도 지금처럼 이 기기에 저장하고 초대 코드로 일행과 함께 쓸 수 있어요.</div>';
+      if (!cfg) {
+        html += '<div class="note mt12 warn-note">로그인을 쓰려면 먼저 <b>Firebase 연결</b>이 필요해요. 설정은 1분이면 끝나요.</div>' +
+          '<div class="btn-row mt12"><button class="btn btn-primary" data-action="open-settings">Firebase 설정 열기</button></div>' +
+          '<div class="hintline">Firebase를 연결하고 Authentication에서 Google·이메일 로그인을 켜면 바로 로그인할 수 있어요.</div>';
+      } else {
+        html += '<button class="btn provider google mt12" data-action="auth-google">' + UI.icon('google', 18) + 'Google로 계속하기</button>';
+        html += '<div class="or-line"><span>또는 이메일</span></div>';
+        html += '<div class="form-row"><label class="fl">이메일</label>' +
+          '<input class="input" id="auth_email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com"></div>';
+        html += '<div class="form-row"><label class="fl">비밀번호</label>' +
+          '<input class="input" id="auth_pw" type="password" autocomplete="current-password" placeholder="6자 이상"></div>';
+        var lastErr = TL.Auth && TL.Auth.lastError ? TL.Auth.lastError() : null;
+        html += '<div class="auth-msg' + (lastErr ? ' err' : '') + '" id="auth-msg">' + (lastErr ? UI.esc(lastErr.message) : '') + '</div>';
+        html += '<div class="btn-row"><button class="btn btn-ghost" data-action="auth-email">로그인</button>' +
+          '<button class="btn btn-primary" data-action="auth-signup">회원가입</button></div>';
+        html += '<button class="btn btn-link sm" data-action="auth-reset">비밀번호를 잊었어요</button>';
+        html += '<div class="hintline">Firebase 콘솔 › Authentication에서 <b>Google</b>·<b>이메일/비밀번호</b>를 켜고, ' +
+          '<b>승인된 도메인</b>에 이 사이트 주소(<b>taijichoi.github.io</b>)가 있어야 로그인돼요.</div>';
+        html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">나중에</button></div>';
+      }
+    }
+    open(html, '계정');
+  };
+
+  /** 이 기기에만 있는 여행을 계정에 연결할지 묻는 시트 */
+  D.merge = function () {
+    if (!TL.Account || !TL.Account.signedIn()) return;
+    var plan = TL.Account.plan();
+    var trips = plan.localOnly.map(function (id) { return Store.trip(id); }).filter(Boolean);
+    if (!trips.length) return;
+    var html = '<div class="note">이 기기에만 있던 여행 <b>' + trips.length + '개</b>를 계정에 연결할까요? ' +
+      '연결하면 다른 기기에서 같은 계정으로 로그인했을 때도 열려요.</div>';
+    html += '<div class="merge-list">' + trips.map(function (t) {
+      return '<div class="mrow">' + UI.avatar(t.name, 'sm') + '<span class="grow"><b>' + UI.esc(t.name) + '</b>' +
+        '<small>' + UI.esc(t.destination || '여행지 없음') + ' · ' + UI.esc(Core.rangeLabel(t.startDate, t.endDate)) + '</small></span></div>';
+    }).join('') + '</div>';
+    html += '<div class="hintline">로그인 계정에 연결하면 그 여행은 초대 코드로 공유할 수 있는 상태가 돼요.</div>';
+    html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">나중에</button>' +
+      '<button class="btn btn-primary" data-action="acct-merge">계정에 연결</button></div>';
+    open(html, '내 여행 계정에 연결');
+  };
+
+  A['open-account'] = function () { D.account(); };
+  A['auth-google'] = function () {
+    if (!Store.firebaseConfig()) { D.account(); UI.toast('먼저 Firebase를 연결해 주세요', 2600); return; }
+    if (!TL.Auth) return;
+    authMsg('Google 로그인 창을 여는 중…');
+    TL.Auth.signInGoogle().then(function (res) {
+      if (res && res.method === 'redirect') { UI.toast('로그인 화면으로 이동해요…', 2400); return; }
+      afterSignIn();
+    }).catch(function (e) {
+      authMsg(TL.Auth.errorText(e), 'err');
+    });
+  };
+  A['auth-email'] = function () {
+    var email = (UI.val('auth_email') || '').trim();
+    var pw = UI.val('auth_pw') || '';
+    if (!validEmail(email)) { authMsg('이메일 주소를 확인해 주세요.', 'err'); return; }
+    if (!pw) { authMsg('비밀번호를 입력해 주세요.', 'err'); return; }
+    authMsg('로그인하는 중…');
+    TL.Auth.signInEmail(email, pw).then(afterSignIn).catch(function (e) {
+      authMsg(TL.Auth.errorText(e), 'err');
+    });
+  };
+  A['auth-signup'] = function () {
+    var email = (UI.val('auth_email') || '').trim();
+    var pw = UI.val('auth_pw') || '';
+    if (!validEmail(email)) { authMsg('이메일 주소를 확인해 주세요.', 'err'); return; }
+    if (String(pw).length < 6) { authMsg('비밀번호는 6자 이상이어야 해요.', 'err'); return; }
+    authMsg('계정을 만드는 중…');
+    TL.Auth.signUpEmail(email, pw, Core.localPart(email)).then(afterSignIn).catch(function (e) {
+      authMsg(TL.Auth.errorText(e), 'err');
+    });
+  };
+  A['auth-reset'] = function () {
+    var email = (UI.val('auth_email') || '').trim();
+    if (!validEmail(email)) { authMsg('재설정 메일을 받을 이메일을 먼저 입력해 주세요.', 'err'); return; }
+    authMsg('재설정 메일을 보내는 중…');
+    TL.Auth.resetPassword(email).then(function () {
+      authMsg('비밀번호 재설정 메일을 보냈어요. 메일함을 확인해 주세요.', 'ok');
+    }).catch(function (e) { authMsg(TL.Auth.errorText(e), 'err'); });
+  };
+  A['auth-signout'] = function () {
+    TL.Auth.signOut().then(function () {
+      if (TL.Account) TL.Account.stop();
+      UI.close();
+      if (TL.App && TL.App.render) TL.App.render();
+      UI.toast('로그아웃했어요 · 게스트로 계속 쓸 수 있어요', 2800);
+    }).catch(function (e) { authMsg(TL.Auth.errorText(e), 'err'); });
+  };
+  A['auth-sync'] = function () {
+    if (!TL.Account || !TL.Account.signedIn()) return;
+    UI.toast('동기화하는 중…', 1600);
+    TL.Account.sync().then(function (r) {
+      D.account();
+      UI.toast('동기화했어요 · 올림 ' + (r.registered || 0) + ' · 가져옴 ' + (r.pulled || 0), 3000);
+    }).catch(function (e) { UI.toast('동기화 실패: ' + (e.message || e), 3200); });
+  };
+  A['acct-merge'] = function () {
+    if (!TL.Account || !TL.Account.signedIn()) return;
+    var n = TL.Account.plan().localOnly.length;
+    if (!confirm('이 기기의 여행 ' + n + '개를 계정에 연결할까요?\n연결하면 다른 기기에서도 열 수 있어요.')) return;
+    UI.toast('계정에 연결하는 중…', 2000);
+    TL.Account.mergeLocal().then(function (r) {
+      D.account();
+      UI.toast(r.merged ? r.merged + '개 여행을 계정에 연결했어요' : '연결할 여행이 없어요', 3000);
+    }).catch(function (e) { UI.toast('연결 실패: ' + (e.message || e), 3200); });
+  };
+
   /* ================================================================ 공유 */
   function b64url(str) { return Core.b64urlEncode(str); }
   function shareUrl(trip) {
@@ -1078,11 +1236,27 @@
     trip = trip || TL.App.currentTrip();
     var s = Store.settings();
     var cfg = s.firebase;
+    var signed = !!(TL.Auth && TL.Auth.signedIn());
     var html = '';
     html += '<div class="form-row"><label class="fl">내 이름 (닉네임)</label>' +
       '<input class="input" id="f_nick" value="' + UI.esc(s.nickname) + '" placeholder="예: 재원" maxlength="12">' +
       '<div class="hintline">결제자를 고를 때 기본값으로 쓰여요.</div>' +
       '<button class="btn btn-ghost sm mt8" data-action="save-nick" style="width:100%">닉네임 저장</button></div>';
+
+    html += '<div class="section-title" style="margin-top:20px"><h2>계정 로그인</h2>' +
+      '<span class="pill ' + (signed ? 'mint' : 'gray') + '">' + (signed ? UI.esc(TL.Auth.displayName()) + '님' : '게스트') + '</span></div>';
+    html += '<div class="note">Google 또는 이메일로 로그인하면 <b>내 여행 목록이 계정에 저장</b>돼 다른 기기에서도 그대로 열려요. ' +
+      '로그인하지 않아도 이 기기 저장·초대 코드 참여는 그대로 동작해요.</div>';
+    html += '<div class="btn-row mt8"><button class="btn btn-ghost sm" data-action="open-account">' +
+      UI.icon(signed ? 'users' : 'google', 17) + (signed ? '계정 관리 · 로그아웃' : '로그인 · 계정') + '</button></div>';
+    html += '<details class="mt12"><summary class="tiny muted" style="cursor:pointer">Firebase에서 로그인 켜기 (Google · 이메일)</summary>' +
+      '<div class="note mt8"><b>Authentication 설정 (한 번만)</b><ol>' +
+      '<li>Firebase 콘솔 → 왼쪽 <b>Build › Authentication</b> → <b>시작하기</b></li>' +
+      '<li><b>Sign-in method</b> 탭 → <b>Google</b> → <b>사용 설정</b> → 프로젝트 지원 이메일 고르고 <b>저장</b></li>' +
+      '<li>같은 화면 <b>Email/Password</b> → <b>사용 설정</b> → <b>저장</b></li>' +
+      '<li><b>Settings</b> 탭 → <b>승인된 도메인</b>에 <b>taijichoi.github.io</b> 추가(기본 <b>localhost</b>는 그대로)</li>' +
+      '<li>Firestore <b>규칙</b>에 아래 로그인 규칙을 넣고 <b>게시</b> (계정별 여행 목록 저장용)</li>' +
+      '</ol></div></details>';
 
     html += '<div class="section-title" style="margin-top:20px"><h2>일행과 실시간 공유</h2>' +
       '<span class="pill ' + (cfg ? 'mint' : 'gray') + '">' + (cfg ? '설정됨' : '미설정') + '</span></div>';
@@ -1094,7 +1268,8 @@
         '<li><a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a> → <b>프로젝트 추가</b> (이름 아무거나, 애널리틱스는 꺼도 됨)</li>' +
         '<li>왼쪽 <b>Build › Firestore Database</b> → <b>데이터베이스 만들기</b> → 위치 <b>asia-northeast3(서울)</b> → <b>프로덕션 모드로 시작</b></li>' +
         '<li>프로젝트 설정(⚙) › <b>내 앱</b> › 웹 <b>&lt;/&gt;</b> 추가 → <b>firebaseConfig</b> 복사</li>' +
-        '<li>Firestore <b>규칙</b> 탭에 아래 규칙을 붙여넣고 <b>게시</b></li>' +
+        '<li><b>Build › Authentication</b> → 시작하기 → <b>Google</b>·<b>Email/Password</b> 사용 설정, <b>승인된 도메인</b>에 <b>taijichoi.github.io</b> 추가 (로그인)</li>' +
+        '<li>Firestore <b>규칙</b> 탭에 아래 규칙을 붙여넣고 <b>게시</b> (공유 + 로그인 계정)</li>' +
         '<li>복사한 설정을 아래에 붙여넣고 <b>저장</b></li>' +
       '</ol></div>';
       html += '<div class="code-box light" id="rules">' + UI.esc(D.RULES) + '</div>' +
@@ -1146,9 +1321,15 @@
   D.RULES = "rules_version = '2';\n" +
     "service cloud.firestore {\n" +
     "  match /databases/{database}/documents {\n" +
+    "    // 일행 공유: 초대 코드를 아는 사람은 누구나 읽고 쓸 수 있다\n" +
     "    match /trips/{code} { allow read, write: if true; }\n" +
     "    match /trips/{code}/{document=**} { allow read, write: if true; }\n" +
     "    match /triplog_meta/{doc} { allow read, write: if true; }\n" +
+    "    // 로그인 계정: 본인만 읽고 쓸 수 있다 (내 여행 목록·프로필)\n" +
+    "    match /users/{uid} {\n" +
+    "      allow read, write: if request.auth != null && request.auth.uid == uid;\n" +
+    "      match /trips/{code} { allow read, write: if request.auth != null && request.auth.uid == uid; }\n" +
+    "    }\n" +
     "  }\n" +
     "}";
 
@@ -1175,10 +1356,12 @@
     UI.toast('연결을 확인하는 중…');
     Store.testFirebase(cfg).then(function () {
       Store.setFirebase(cfg);
+      if (TL.Auth) { TL.Auth.reset(); TL.Auth.init(); }
       D.settings(TL.App.currentTrip());
-      UI.toast('연결됐어요! 이제 여행에서 공유를 켜세요');
+      UI.toast('연결됐어요! 이제 설정에서 로그인하거나 여행에서 공유를 켜세요');
     }).catch(function (e) {
       Store.setFirebase(cfg);
+      if (TL.Auth) { TL.Auth.reset(); TL.Auth.init(); }
       UI.toast('저장은 했지만 테스트 실패: ' + (e.code || e.message || e));
       D.settings(TL.App.currentTrip());
     });
@@ -1197,9 +1380,11 @@
     });
   };
   A['remove-fb'] = function () {
-    if (!confirm('Firebase 설정을 지울까요? 실시간 공유가 끊기고 로컬 저장으로 돌아갑니다.')) return;
+    if (!confirm('Firebase 설정을 지울까요? 실시간 공유와 로그인이 끊기고 로컬 저장으로 돌아갑니다.')) return;
+    if (TL.Account) TL.Account.stop();
     Store.setFirebase(null);
     Store.disconnect();
+    if (TL.Auth) TL.Auth.reset();
     D.settings(TL.App.currentTrip());
     UI.toast('설정을 지웠어요');
   };

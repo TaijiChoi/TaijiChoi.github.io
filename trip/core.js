@@ -968,6 +968,57 @@
     for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return new TextDecoder().decode(bytes);
   };
+  /* ------------------------------------------------------------ 계정 */
+  /** 이메일에서 @ 앞부분 (displayName이 없을 때 쓸 이름) */
+  Core.localPart = function (email) {
+    var s = String(email == null ? '' : email).trim();
+    var at = s.indexOf('@');
+    return (at > 0 ? s.slice(0, at) : s).trim();
+  };
+  /** 로그인 계정에서 화면에 보일 이름: displayName → 이메일 앞부분 → '나' (12자 제한) */
+  Core.accountLabel = function (user) {
+    var name = String((user && user.displayName) || '').trim();
+    if (!name && user && user.email) name = Core.localPart(user.email);
+    name = name.trim().slice(0, 12);
+    return name || '나';
+  };
+  /** 여행에서 이 계정의 역할: 만든 사람이면 owner, 아니면 member */
+  Core.tripRole = function (trip, uid) {
+    if (!trip || !uid) return 'member';
+    return trip.ownerUid === uid ? 'owner' : 'member';
+  };
+  /** 기기 여행 목록과 계정 여행 목록을 맞출 계획
+      pull: 계정에는 있는데 이 기기에 없는 초대코드(가져올 것)
+      register: 이 기기 원격 여행 중 계정에 없는 코드(올릴 것)
+      localOnly: 초대코드가 없어 계정에 올릴 수 없는 여행 id(로컬 전용) */
+  Core.accountPlan = function (localTrips, accountTrips) {
+    function codeOf(v) { return String(v == null ? '' : v).trim().toUpperCase(); }
+    var valid = /^[A-Z0-9]{4,10}$/;
+    var localCodes = [];
+    var localOnly = [];
+    (localTrips || []).forEach(function (t) {
+      if (!t) return;
+      var c = codeOf(t.remoteCode || t.inviteCode);
+      if (valid.test(c)) { if (localCodes.indexOf(c) < 0) localCodes.push(c); }
+      else if (t.sample) return;              // 예시 여행은 계정에 올리지 않는다
+      else if (t.id) localOnly.push(t.id);
+    });
+    var accountCodes = [];
+    (accountTrips || []).forEach(function (a) {
+      if (!a) return;
+      var c = codeOf(a.remoteCode || a.code || a.id);
+      if (!valid.test(c)) return;
+      if (a.local) return;                    // 계정에만 적힌 로컬 여행은 다른 기기에서 못 연다
+      if (accountCodes.indexOf(c) < 0) accountCodes.push(c);
+    });
+    return {
+      pull: accountCodes.filter(function (c) { return localCodes.indexOf(c) < 0; }),
+      register: localCodes.filter(function (c) { return accountCodes.indexOf(c) < 0; }),
+      localOnly: localOnly,
+      synced: localCodes.filter(function (c) { return accountCodes.indexOf(c) >= 0; }).length,
+      remoteCount: localCodes.length
+    };
+  };
   Core.esc = function (s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

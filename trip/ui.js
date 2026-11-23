@@ -252,17 +252,32 @@
   };
   UI.refresh = function () { if (TL.App && TL.App.render) TL.App.render(); };
 
+  /* ------------------------------------------------------------ account */
+  /** 홈 상단의 계정 배지: 로그인 전에는 'Google 로그인' 버튼, 로그인 뒤에는 이름 칩 */
+  UI.accountBadgeHtml = function () {
+    if (TL.Auth && TL.Auth.signedIn()) {
+      var name = TL.Auth.displayName();
+      return '<button class="acct-chip" data-action="open-account" aria-label="계정">' +
+        UI.avatar(name, 'sm') + '<span class="nm">' + UI.esc(name) + '</span>' +
+        (TL.Account && TL.Account.syncing() ? '<span class="dot-sync" aria-hidden="true"></span>' : '') +
+        '</button>';
+    }
+    return '<button class="auth-btn" data-action="open-account">' + UI.icon('google', 15) + '<span>로그인</span></button>';
+  };
+
   /* --------------------------------------------------------------- home */
   UI.renderHome = function () {
     var trips = Store.trips();
+    var signed = !!(TL.Auth && TL.Auth.signedIn());
     var html = '';
     html += '<header class="topbar plain">' +
       '<div class="brand"><span class="brand-mark">' + UI.icon('plane', 16) + '</span>트립로그</div>' +
+      UI.accountBadgeHtml() +
       '<button class="icon-btn" data-action="open-settings" aria-label="설정">' + UI.icon('gear') + '</button>' +
       '</header>';
     html += '<div class="body">';
     html += '<section class="hello">' +
-      '<h1>여행 준비,<br><span class="grad-text">기록은 여기서</span></h1>' +
+      '<h1>' + (signed ? UI.esc(TL.Auth.displayName()) + '님,<br><span class="grad-text">여행 준비는 여기서</span>' : '여행 준비,<br><span class="grad-text">기록은 여기서</span>') + '</h1>' +
       '<p>일정 · 가계부 · 준비물을 한 곳에. 일행과 실시간으로 함께 써요.</p>' +
       '</section>';
 
@@ -282,7 +297,9 @@
         '</div>';
     }
     html += '<div class="tiny muted center" style="margin:26px 0 8px;line-height:1.6">' +
-      '데이터는 이 기기 브라우저에 저장돼요.<br>일행과 함께 쓰려면 설정에서 실시간 공유를 켜세요.</div>';
+      (signed
+        ? '로그인한 계정에 여행 목록을 저장했어요.<br>다른 기기에서 같은 계정으로 로그인하면 그대로 열려요.'
+        : '데이터는 이 기기 브라우저에 저장돼요.<br>로그인하면 다른 기기에서도 열리고, 일행과 함께 쓰려면 실시간 공유를 켜세요.') + '</div>';
     html += '</div>';
     return html;
   };
