@@ -114,6 +114,9 @@
     if (err && typeof err === 'string') code = err;
     else if (err && err.code) code = String(err.code);
     if (MESSAGES[code]) return MESSAGES[code];
+    if (/^auth\/api-key-not-valid/.test(code) || code === 'auth/invalid-api-key') {
+      return 'Firebase 설정의 apiKey가 올바르지 않아요. 설정을 다시 확인해 주세요.';
+    }
     var msg = err && (err.message || err.code) ? (err.message || err.code) : String(err || '로그인하지 못했어요.');
     return '로그인하지 못했어요: ' + msg;
   };
