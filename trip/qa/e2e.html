@@ -119,12 +119,10 @@
 
     // 초기 상태: 이 브라우저 프로필의 이 사이트 테스트 데이터만 비운다
     w.localStorage.clear();
-    // 배포된 최신 파일을 보도록 서비스 워커 캐시도 비운다 (앱이 다시 등록한다)
+    // 배포된 최신 파일을 보도록 앱 셸 캐시만 비운다 (등록된 SW는 그대로 두고 다시 받아 채운다)
     try {
       var ks = await w.caches.keys();
-      await Promise.all(ks.map(function (k) { return w.caches.delete(k); }));
-      var regs = await w.navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(function (r) { return r.unregister(); }));
+      await Promise.all(ks.map(function (k) { return caches.delete(k); }));
     } catch (e) {}
     await new Promise(function (res) {
       var done = false;
@@ -477,7 +475,11 @@
 
     /* ============ 4e) v15: 서비스 워커 · 오프라인 배지 ============ */
     var reg = null;
-    try { reg = await w.navigator.serviceWorker.getRegistration(); } catch (e) {}
+    for (var rgi = 0; rgi < 20; rgi++) {
+      try { reg = await w.navigator.serviceWorker.getRegistration(); } catch (e) {}
+      if (reg) break;
+      await sleep(200);
+    }
     ok(!!reg, '서비스 워커 등록', reg && reg.scope);
     var cacheKeys = [];
     try { cacheKeys = await w.caches.keys(); } catch (e) {}
