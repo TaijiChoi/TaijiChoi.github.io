@@ -53,7 +53,12 @@
     w.TL.App.render();
 
     var f2 = document.getElementById('f2'), f3 = document.getElementById('f3');
+    // 시드 데이터를 읽도록 두 프레임을 새로 연다
+    var stamp = Date.now();
+    f2.src = '../index.html?shot=2&t=' + stamp;
+    f3.src = '../index.html?shot=3&t=' + stamp;
     await Promise.all([waitReady(f2), waitReady(f3)]);
+    await sleep(300);
     var w2 = f2.contentWindow, w3 = f3.contentWindow;
     w2.TL.App.openTrip(t.id, 'schedule');
     w2.TL.App.view.day = 'd2';
