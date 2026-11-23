@@ -132,6 +132,7 @@
       });
     });
     if (!payloads.length) { UI.toast('추가할 초안을 하나 이상 체크해 주세요'); return; }
+    if (TL.App && TL.App.view) TL.App.view.day = firstDay;
     Store.addSchedulesBulk(trip.id, payloads);
     var text = st.text || '';
     if (String(text).trim()) {
@@ -143,7 +144,6 @@
     }
     st.parsed = null;
     st.text = '';
-    if (TL.App && TL.App.view) TL.App.view.day = firstDay;
     UI.close();
     UI.toast(payloads.length + '개 일정을 추가했어요 · ' + Core.dayLabel(trip, firstDay));
   };

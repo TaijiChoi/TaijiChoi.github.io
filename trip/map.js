@@ -55,7 +55,7 @@
     var myPaint = ++paintedAt;
     M.ensure().then(function (L) {
       if (myPaint !== paintedAt) return;
-      if (!document.getElementById('route-map')) return;
+      if (document.getElementById('route-map') !== el) return;
       if (navigator.onLine === false) throw new Error('오프라인이라 지도 타일을 불러올 수 없어요');
       var m = L.map(el, { scrollWheelZoom: false, zoomControl: true, attributionControl: true });
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {

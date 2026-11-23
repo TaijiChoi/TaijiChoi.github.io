@@ -512,11 +512,11 @@
       source: p ? (p.source || '') : '',
       memo: UI.val('f_memo').trim()
     };
+    TL.App.view.day = payload.dayKey;
     var saved = dlg.id ? Store.update(trip.id, 'schedules', dlg.id, payload) : Store.add(trip.id, 'schedules', payload);
     var pairs = Core.overlapPairs(Core.sortedSchedules(trip.data, payload.dayKey))
       .filter(function (x) { return saved && (x.aId === saved.id || x.bId === saved.id); });
     UI.close();
-    TL.App.view.day = payload.dayKey;
     if (pairs.length) {
       UI.toast((dlg.id ? '수정했어요' : '일정을 추가했어요') + ' · 시간이 겹치는 일정이 ' + pairs.length + '개 있어요', 3400);
     } else {
@@ -529,18 +529,18 @@
     var trip = tripOf() || TL.App.currentTrip();
     var to = UI.val('f_to_day');
     if (!trip || !dlg.id || !to) return;
+    TL.App.view.day = to;
     Store.moveScheduleToDay(trip.id, dlg.id, to);
     UI.close();
-    TL.App.view.day = to;
     UI.toast(Core.dayLabel(trip, to) + '로 옮겼어요');
   };
   A['sched-copy-day'] = function () {
     var trip = tripOf() || TL.App.currentTrip();
     var to = UI.val('f_to_day');
     if (!trip || !dlg.id || !to) return;
+    TL.App.view.day = to;
     var copy = Store.copySchedule(trip.id, dlg.id, to);
     UI.close();
-    TL.App.view.day = to;
     UI.toast(copy ? Core.dayLabel(trip, to) + '에 복사했어요' : '복사하지 못했어요');
   };
 
@@ -573,6 +573,7 @@
     var day = el.getAttribute('data-day');
     var mode = el.getAttribute('data-mode');
     if (!trip || !dlg.id || !day) return;
+    TL.App.view.day = day;
     if (mode === 'move') {
       Store.moveScheduleToDay(trip.id, dlg.id, day);
       UI.toast(Core.dayLabel(trip, day) + '로 옮겼어요');
@@ -581,7 +582,6 @@
       UI.toast(Core.dayLabel(trip, day) + '에 복사했어요');
     }
     UI.close();
-    TL.App.view.day = day;
   };
 
   A['del-schedule'] = function (el) {
@@ -643,7 +643,7 @@
         Store.setRateCache(rates);
         var rateEl = document.getElementById('f_rate');
         var curNow = UI.val('f_currency') || 'KRW';
-        if (rateEl && curNow !== 'KRW' && rates[curNow]) {
+        if (rateEl && curNow !== 'KRW' && rates[curNow] && !(dlg && dlg.rateManual)) {
           rateEl.value = rates[curNow];
           setRateStatus('자동 환율 · ' + rateStatusText() + ' 기준');
           updateExpensePreview();
@@ -672,6 +672,7 @@
       payerId: item ? (item.payerId || me) : me,
       private: item ? !!item.private : false,
       chargedOn: !!(item && Number(item.chargedKRW) > 0),
+      rateManual: false,
       dayKey: wantDay
     };
     D.trip = trip;
@@ -777,7 +778,12 @@
   D.updateExpensePreview = updateExpensePreview;
   D.autoRate = applyAutoRate;
 
-  A['refresh-rate'] = function () { fetchRates(UI.val('f_currency')); };
+  D.markRateManual = function () { if (dlg) dlg.rateManual = true; };
+  D.resetRateManual = function () { if (dlg) dlg.rateManual = false; };
+  A['refresh-rate'] = function () {
+    if (dlg) dlg.rateManual = false;
+    fetchRates(UI.val('f_currency'));
+  };
   A['toggle-charged'] = function (el) {
     dlg.chargedOn = !dlg.chargedOn;
     el.classList.toggle('on', dlg.chargedOn);

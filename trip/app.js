@@ -221,9 +221,11 @@
       var cur = ev.target.value;
       var rateEl = document.getElementById('f_rate');
       if (rateEl) rateEl.value = cur === 'KRW' ? '' : (Store.cachedAutoRate(cur) || Store.tripRate(App.currentTrip(), cur));
+      if (TL.Dialogs.resetRateManual) TL.Dialogs.resetRateManual();
       TL.Dialogs.updateExpensePreview();
       if (cur !== 'KRW' && TL.Dialogs.autoRate) TL.Dialogs.autoRate(cur);
     } else if (id === 'f_amount' || id === 'f_rate' || id === 'f_charged') {
+      if (id === 'f_rate' && TL.Dialogs.markRateManual) TL.Dialogs.markRateManual();
       TL.Dialogs.updateExpensePreview();
     }
   }
