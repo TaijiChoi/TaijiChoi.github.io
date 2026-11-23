@@ -126,9 +126,8 @@
       else trip[k] = patch[k];
     });
     trip.updatedAt = new Date().toISOString();
-    if (trip.remoteCode && conn && conn.code === trip.remoteCode) {
-      remoteWrite(trip, metaDoc(trip), metaPayload(trip));
-    }
+    var metaKeys = Object.keys(patch);
+    if (metaKeys.length) pushMeta(trip, metaKeys);
     notify();
     return trip;
   };
@@ -140,20 +139,29 @@
     notify();
   };
 
-  function metaPayload(trip) {
-    return {
-      name: trip.name || '',
-      destination: trip.destination || '',
-      startDate: trip.startDate || '',
-      endDate: trip.endDate || '',
-      baseCurrency: trip.baseCurrency || 'KRW',
-      members: trip.members || [],
-      rates: trip.rates || {},
-      updatedAt: new Date().toISOString()
-    };
+  var META_FIELDS = ['name', 'destination', 'startDate', 'endDate', 'baseCurrency', 'members', 'rates'];
+  /** 메타 문서에 실어 보낼 값. keys를 주면 그 항목만 담는다(merge 쓰기라 나머지 필드는 그대로 남는다). */
+  function metaPayload(trip, keys) {
+    var use = Array.isArray(keys) && keys.length ? keys : META_FIELDS;
+    var out = {};
+    use.forEach(function (k) {
+      if (META_FIELDS.indexOf(k) < 0) return;
+      if (k === 'members') out.members = trip.members || [];
+      else if (k === 'rates') out.rates = trip.rates || {};
+      else if (k === 'baseCurrency') out.baseCurrency = trip.baseCurrency || 'KRW';
+      else out[k] = trip[k] || '';
+    });
+    out.updatedAt = new Date().toISOString();
+    return out;
   }
+  /** 여행 정보·일행 목록이 사는 문서의 경로. remoteWrite는 첫 요소를 초대코드로 읽는다. */
   function metaDoc(trip) {
-    return ['trips', trip.remoteCode];
+    return [trip.remoteCode];
+  }
+  /** 연결이 살아 있을 때만 메타 문서에 쓴다. 첫 스냅샷을 받기 전에는 상대 여행 정보를 덮어쓰지 않는다. */
+  function pushMeta(trip, keys) {
+    if (!trip || !trip.remoteCode || !conn || conn.code !== trip.remoteCode || !conn.metaReady) return;
+    remoteWrite(trip, metaDoc(trip), metaPayload(trip, keys));
   }
 
   /* ------------------------------------------------------------ runtime */
@@ -188,9 +196,7 @@
     if (!isFinite(r) || r <= 0) return;
     trip.rates = Object.assign({}, trip.rates || {}, {});
     trip.rates[code] = r;
-    if (trip.remoteCode && conn && conn.code === trip.remoteCode) {
-      remoteWrite(trip, metaDoc(trip), metaPayload(trip));
-    }
+    pushMeta(trip, ['rates']);
     notify();
   };
 
@@ -250,7 +256,7 @@
     var old = target.name;
     target.name = name;
     if (state.nickname === old) state.nickname = name;
-    if (trip.remoteCode && conn && conn.code === trip.remoteCode) remoteWrite(trip, metaDoc(trip), metaPayload(trip));
+    pushMeta(trip, ['members']);
     notify();
     return { ok: true, name: name };
   };
@@ -262,7 +268,7 @@
     for (var i = 0; i < trip.members.length; i++) if (trip.members[i].name === name) return trip.members[i];
     var m = { id: Core.uid('m'), name: name };
     trip.members = trip.members.concat([m]);
-    if (trip.remoteCode && conn && conn.code === trip.remoteCode) remoteWrite(trip, metaDoc(trip), metaPayload(trip));
+    pushMeta(trip, ['members']);
     notify();
     return m;
   };
@@ -285,13 +291,17 @@
       }
       if (dirty) touched.push(e);
     });
-    (trip.data.checklist || []).forEach(function (c) { if (c.assigneeId === memberId) c.assigneeId = ''; });
+    var touchedChecks = [];
+    (trip.data.checklist || []).forEach(function (c) {
+      if (c.assigneeId === memberId) { c.assigneeId = ''; touchedChecks.push(c); }
+    });
     if (state.meByTrip && state.meByTrip[tripId] === memberId) delete state.meByTrip[tripId];
     if (trip.remoteCode) {
       touched.forEach(function (e) { remoteWrite(trip, [trip.remoteCode, 'expenses', e.id], stripId(e)); });
+      touchedChecks.forEach(function (c) { remoteWrite(trip, [trip.remoteCode, 'checklist', c.id], stripId(c)); });
     }
     if (removed.name && state.nickname === removed.name) state.nickname = '';
-    if (trip.remoteCode && conn && conn.code === trip.remoteCode) remoteWrite(trip, metaDoc(trip), metaPayload(trip));
+    pushMeta(trip, ['members']);
     notify();
     return { ok: true, name: removed.name, moved: moved };
   };
@@ -491,7 +501,7 @@
       trip.remoteCode = code;
       trip.inviteCode = code;
       closeConn();
-      conn = { code: code, tripId: trip.id, unsubs: [] };
+      conn = { code: code, tripId: trip.id, unsubs: [], metaReady: false };
 
       var metaRef = fsMod.doc(db, 'trips', code);
       var settled = false;
@@ -524,6 +534,7 @@
           trip.members = Array.isArray(m.members) ? m.members : trip.members;
           trip.rates = m.rates || trip.rates;
           trip.remote = true;
+          if (conn) conn.metaReady = true;
           notify();
           done();
         }, function (e) {
@@ -536,6 +547,8 @@
           payload.createdAt = new Date().toISOString();
           payload.version = 1;
           fsMod.setDoc(metaRef, payload).catch(reportError);
+          // 방을 만든 쪽은 방금 전체 문서를 썼으므로 바로 메타 쓰기를 허용한다
+          if (conn) conn.metaReady = true;
           COLLS.forEach(function (coll) {
             (trip.data[coll] || []).forEach(function (item) {
               fsMod.setDoc(fsMod.doc(db, 'trips', code, coll, item.id), stripId(item)).catch(reportError);
@@ -593,30 +606,41 @@
   function tlStateError(code) { stateError = code; }
   Store.takeError = function () { var e = stateError; stateError = ''; return e; };
 
-  function remoteWrite(trip, path, data) {
-    if (!fs || !db || !trip.remoteCode) return;
-    var code = Array.isArray(path) ? path[0] : trip.remoteCode;
-    var p = Array.isArray(path) ? path.slice() : ['trips', trip.remoteCode];
-    var ref;
-    if (p[1] === 'schedules' || p[1] === 'expenses' || p[1] === 'checklist') {
-      ref = fs.doc(db, 'trips', code, p[1], p[2]);
-    } else {
-      ref = fs.doc(db, 'trips', code);
+  /** 경로 → Firestore 문서 참조
+     ['<초대코드>'], ['<초대코드>', coll, id] 를 기본으로 하고 ['trips', '<초대코드>', ...] 전체 경로도 받아 준다.
+     어떤 모양이 들어와도 항상 trip.remoteCode 아래의 문서 하나로 모은다. */
+  function remoteRef(trip, path) {
+    if (!fs || !db || !trip || !trip.remoteCode) return null;
+    var p = (Array.isArray(path) ? path : []).filter(function (s) { return s !== '' && s != null; });
+    if (p[0] === 'trips') p.shift();
+    if (p[0] === trip.remoteCode) p.shift();
+    else if (p.length > 1 && COLLS.indexOf(p[0]) < 0) p.shift(); // 엉뚱한 코드가 섞여 들어온 경우
+    if (COLLS.indexOf(p[0]) >= 0 && p.length > 1) {
+      return fs.doc(db, 'trips', trip.remoteCode, p[0], String(p[1]));
     }
+    return fs.doc(db, 'trips', trip.remoteCode);
+  }
+  function remoteWrite(trip, path, data) {
+    var ref = remoteRef(trip, path);
+    if (!ref) return;
     fs.setDoc(ref, data, { merge: true }).catch(reportError);
   }
   function remoteDelete(trip, path) {
-    if (!fs || !db || !trip.remoteCode) return;
-    var code = Array.isArray(path) ? path[0] : trip.remoteCode;
-    var p = Array.isArray(path) ? path.slice() : ['trips', trip.remoteCode];
-    var ref;
-    if (p[1] === 'schedules' || p[1] === 'expenses' || p[1] === 'checklist') {
-      ref = fs.doc(db, 'trips', code, p[1], p[2]);
-    } else {
-      ref = fs.doc(db, 'trips', code);
-    }
+    var ref = remoteRef(trip, path);
+    if (!ref) return;
     fs.deleteDoc(ref).catch(reportError);
   }
+
+  /* 테스트 전용: 실제 Firebase 없이 원격 쓰기 경로를 검사할 때 가짜 모듈을 끼워 넣는다 */
+  Store.testInjectRemote = function (fsMod, dbStub) { fs = fsMod || null; db = dbStub || null; };
+  Store.testInjectConn = function (tripId, code, ready) {
+    var trip = Store.trip(tripId);
+    if (!trip) return;
+    closeConn();
+    trip.remoteCode = code;
+    trip.inviteCode = code;
+    conn = { code: code, tripId: trip.id, unsubs: [], metaReady: ready !== false };   // ready=false → 첫 스냅샷 전 상태
+  };
 
   /* ----------------------------------------------------- join / create */
   /** 초대 코드로 참여: 로컬에 여행 자리를 만들고 구독한다. */
