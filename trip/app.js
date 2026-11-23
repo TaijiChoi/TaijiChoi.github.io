@@ -6,7 +6,7 @@
   var App = (TL.App = {});
   var A = TL.Actions;
 
-  App.view = { screen: 'home', tripId: null, tab: 'schedule', day: '', mDay: 'all', mCat: 'all' };
+  App.view = { screen: 'home', tripId: null, tab: 'schedule', day: '', mDay: 'all', mCat: 'all', mapOpen: null };
   var scrollMap = {};
   var booted = false;
 
@@ -51,6 +51,7 @@
     App.view.day = '';
     App.view.mDay = 'all';
     App.view.mCat = 'all';
+    App.view.mapOpen = null;
     Store.setCurrent(id);
     setHash();
     render();
@@ -130,6 +131,16 @@
     var k = key();
     requestAnimationFrame(function () { window.scrollTo(0, scrollMap[k] || 0); });
 
+    // 동선 지도: 지도 패널이 열려 있을 때만 그림을 그린다 (구간 정보는 HTML에 이미 있음)
+    if (TL.RouteMap) {
+      if (v.screen === 'trip' && trip && v.tab === 'schedule') {
+        var dayKey = v.day || Screens.defaultDay(trip);
+        requestAnimationFrame(function () { TL.RouteMap.paint(trip, dayKey); });
+      } else {
+        TL.RouteMap.hide();
+      }
+    }
+
     // 실시간 상태 안내
     if (v.screen === 'trip' && trip && trip.remoteCode) {
       var st = Store.status();
@@ -156,8 +167,13 @@
     if (act === 'close-modal') { UI.close(); return; }
     if (act === 'pick-day') {
       var day = el.getAttribute('data-day');
-      if (App.view.tab === 'schedule') App.view.day = day;
+      if (App.view.tab === 'schedule') { App.view.day = day; App.view.mapOpen = null; }
       else App.view.mDay = day;
+      render();
+      return;
+    }
+    if (act === 'toggle-map') {
+      App.view.mapOpen = el.getAttribute('aria-expanded') !== 'true';
       render();
       return;
     }
@@ -204,9 +220,10 @@
     if (id === 'f_currency') {
       var cur = ev.target.value;
       var rateEl = document.getElementById('f_rate');
-      if (rateEl) rateEl.value = cur === 'KRW' ? '' : Store.tripRate(App.currentTrip(), cur);
+      if (rateEl) rateEl.value = cur === 'KRW' ? '' : (Store.cachedAutoRate(cur) || Store.tripRate(App.currentTrip(), cur));
       TL.Dialogs.updateExpensePreview();
-    } else if (id === 'f_amount' || id === 'f_rate') {
+      if (cur !== 'KRW' && TL.Dialogs.autoRate) TL.Dialogs.autoRate(cur);
+    } else if (id === 'f_amount' || id === 'f_rate' || id === 'f_charged') {
       TL.Dialogs.updateExpensePreview();
     }
   }
@@ -228,6 +245,8 @@
     if (id === 'f_code') { ev.preventDefault(); if (A['do-join']) A['do-join'](); }
     if (id === 'f_name' || id === 'f_dest') { ev.preventDefault(); }
     if (id === 'f_amount') { ev.preventDefault(); }
+    if (id === 'pl_q') { ev.preventDefault(); if (A['pl-search']) A['pl-search'](); }
+    if (id === 'f_charged') { ev.preventDefault(); }
   });
 
   window.addEventListener('scroll', function () {
@@ -248,9 +267,98 @@
     }
   });
 
+  /* ---------------------------------------------------- 순서 드래그(포인터) */
+  var drag = null;
+
+  function dragCleanup() {
+    if (!drag) return;
+    if (drag.el) {
+      drag.el.classList.remove('dragging');
+      drag.el.style.transform = '';
+    }
+    Array.prototype.forEach.call(document.querySelectorAll('.tl-item.drop-hint'), function (el) {
+      el.classList.remove('drop-hint');
+    });
+    document.body.classList.remove('dragging');
+    drag = null;
+  }
+
+  document.addEventListener('pointerdown', function (ev) {
+    var h = ev.target.closest('[data-drag="handle"]');
+    if (!h || ev.button === 2) return;
+    var item = h.closest('.tl-item');
+    var list = document.getElementById('tl-list');
+    if (!item || !list) return;
+    var items = Array.prototype.slice.call(list.querySelectorAll('.tl-item'));
+    var idx = items.indexOf(item);
+    if (idx < 0) return;
+    ev.preventDefault();
+    drag = {
+      el: item, items: items, from: idx, to: idx, startY: ev.clientY, moved: false,
+      day: list.getAttribute('data-day'), id: h.getAttribute('data-id'), pointer: ev.pointerId
+    };
+    item.classList.add('dragging');
+    document.body.classList.add('dragging');
+    try { h.setPointerCapture(ev.pointerId); } catch (e) {}
+  });
+
+  document.addEventListener('pointermove', function (ev) {
+    if (!drag) return;
+    var dy = ev.clientY - drag.startY;
+    if (Math.abs(dy) > 5) drag.moved = true;
+    drag.el.style.transform = 'translateY(' + dy + 'px)';
+    var y = ev.clientY;
+    var to = 0;
+    drag.items.forEach(function (el) {
+      if (el === drag.el) return;
+      var r = el.getBoundingClientRect();
+      if (y > r.top + r.height / 2) to++;
+    });
+    drag.to = to;
+    drag.items.forEach(function (el) { if (el !== drag.el) el.classList.remove('drop-hint'); });
+    var others = drag.items.filter(function (el) { return el !== drag.el; });
+    if (others[to]) others[to].classList.add('drop-hint');
+    if (ev.cancelable) ev.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('pointerup', function () {
+    if (!drag) return;
+    var d = drag;
+    var trip = App.currentTrip();
+    dragCleanup();
+    if (d.moved && trip) Store.reorderSchedule(trip.id, d.day, d.id, d.to);
+  });
+  document.addEventListener('pointercancel', dragCleanup);
+
+  /* --------------------------------------------------------- 오프라인 */
+  window.addEventListener('online', function () {
+    Store.setOnline(true);
+    UI.toast('다시 연결됐어요 · 저장한 내용을 동기화해요');
+    if (TL.RouteMap) TL.RouteMap.online();
+    render();
+  });
+  window.addEventListener('offline', function () {
+    Store.setOnline(false);
+    UI.toast('오프라인 · 기기에 저장하고 나중에 동기화해요', 3000);
+    render();
+  });
+
+  /* ------------------------------------------------------- 서비스 워커 */
+  function registerSW() {
+    if (!('serviceWorker' in navigator)) return;
+    var https = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    if (!https) return;
+    try {
+      navigator.serviceWorker.register('./sw.js').catch(function (e) {
+        console.warn('[triplog] service worker', e);
+      });
+    } catch (e) { /* 사생활 보호 모드 등 */ }
+  }
+
   /* --------------------------------------------------------------- boot */
   function boot() {
     booted = true;
+    Store.setOnline(navigator.onLine !== false);
     var code = Store.bootRemoteFromURL(location.search);
     var initial = parse();
 
@@ -292,6 +400,7 @@
       App.view.tab = initial.tab;
     }
     render();
+    registerSW();
     if (initial.screen === 'trip') {
       var t = Store.trip(initial.tripId);
       if (t && t.remoteCode) Store.openRemote(t.id).catch(function () {});

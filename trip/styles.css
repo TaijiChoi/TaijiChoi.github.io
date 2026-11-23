@@ -543,3 +543,149 @@ select.input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xml
 .sr-file{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
   clip:rect(0 0 0 0);white-space:nowrap;border:0}
 label.btn{cursor:pointer}
+
+/* ===================================================== v15: 지도·검색·예약 */
+/* -------- 예약 보관함 줄 */
+.res-bar{display:flex;align-items:center;gap:10px;width:100%;margin:12px 0 10px;padding:10px 12px;
+  border-radius:14px;border:1px solid #DCE7FA;background:linear-gradient(120deg,#F2F7FF,#EFFBF8);text-align:left}
+.res-bar .rb-ic{width:32px;height:32px;border-radius:10px;background:#fff;display:grid;place-items:center;
+  color:var(--blue-d);flex:none;box-shadow:0 2px 8px rgba(54,143,255,.14)}
+.res-bar .rb-tx{flex:1;min-width:0;display:flex;flex-direction:column}
+.res-bar .rb-tx b{font-size:13.5px;font-weight:750}
+.res-bar .rb-tx small{font-size:11px;color:var(--sub);font-weight:600;margin-top:1px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res-bar:active{filter:brightness(.98)}
+
+/* -------- 동선 지도 */
+.route-card{margin:0 0 10px;border:1px solid var(--line);border-radius:16px;background:#fff;overflow:hidden;box-shadow:var(--shadow)}
+.route-head{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;border:0;background:none;text-align:left}
+.route-head.static{cursor:default}
+.route-head .rh-ic{width:30px;height:30px;border-radius:9px;background:var(--blue-l);color:var(--blue-d);
+  display:grid;place-items:center;flex:none}
+.route-head .rb-tx{flex:1;min-width:0;display:flex;flex-direction:column}
+.route-head .rb-tx b{font-size:13.5px;font-weight:750}
+.route-head .rb-tx small{font-size:11px;color:var(--sub);font-weight:600;margin-top:1px}
+.route-head .chev{color:var(--sub-2);transition:transform .18s;display:grid;place-items:center}
+.route-head .chev.open{transform:rotate(180deg)}
+.empty-map{background:#FBFCFE;border-style:dashed}
+.empty-map .route-head{border:0}
+.map-wrap{padding:0 12px}
+.route-map{position:relative;height:210px;border-radius:12px;background:#E9EFF7;z-index:0;
+  border:1px solid #E2E9F3;overflow:hidden}
+.route-map.failed{display:grid;place-items:center;background:repeating-linear-gradient(45deg,#F4F7FC,#F4F7FC 10px,#EEF3FA 10px,#EEF3FA 20px)}
+.route-map .map-offline{position:absolute;inset:0;display:grid;place-items:center;text-align:center;
+  font-size:11.5px;color:var(--sub);font-weight:650;padding:20px;line-height:1.5;z-index:2;
+  background:rgba(244,247,252,.94)}
+.map-note{font-size:10.5px;color:var(--sub-2);margin:5px 2px 8px;font-weight:600}
+.rt-icon{background:none;border:0}
+.rt-icon span{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;
+  background:linear-gradient(135deg,var(--blue),#2F7BEE);color:#fff;font-size:12.5px;font-weight:800;
+  border:2px solid #fff;box-shadow:0 3px 10px rgba(30,60,120,.3)}
+.route-pins{display:flex;gap:5px;overflow-x:auto;padding:2px 12px 8px;scrollbar-width:none}
+.route-pins::-webkit-scrollbar{display:none}
+.route-pins .rp{display:inline-flex;align-items:center;gap:5px;flex:none;height:26px;padding:0 9px 0 4px;
+  border-radius:999px;background:#F5F8FE;border:1px solid #E4ECF9;font-size:11px;font-weight:700;color:var(--ink-2);
+  max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.route-pins .rp b{width:18px;height:18px;border-radius:50%;background:var(--blue);color:#fff;font-size:9.5px;
+  display:grid;place-items:center;flex:none}
+.seg-list{padding:0 12px 10px}
+.seg-row{display:grid;grid-template-columns:34px 1fr;gap:6px;align-items:start;padding:8px 0;border-top:1px dashed #EDF1F7}
+.seg-row .seg-n{font-size:10.5px;font-weight:800;color:var(--blue-d);background:var(--blue-l);
+  border-radius:6px;padding:3px 0;text-align:center}
+.seg-mid{display:block;min-width:0}
+.seg-mid b{display:block;font-size:12.5px;font-weight:700;letter-spacing:-.2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seg-mid small{display:block;font-size:11px;color:var(--sub);margin-top:2px}
+.seg-links{grid-column:2;display:flex;gap:5px;margin-top:4px}
+.seg-links .tl-map{height:26px;font-size:10.5px;padding:0 8px}
+.tl-geo{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:6px;flex:none;
+  background:#E8F8F3;color:#00927E}
+.tl-addr{font-size:11.5px;color:var(--sub);margin-top:4px;line-height:1.45}
+.tl-warn{display:inline-flex;align-items:center;gap:4px;margin-top:6px;height:22px;padding:0 8px;
+  border-radius:6px;background:#FFF3E4;color:#B4600B;font-size:10.5px;font-weight:750}
+.tl-warn svg{width:12px;height:12px}
+.tl-item.overlap .tl-card{border-color:#FFE0B8}
+.warn-bar{display:flex;gap:8px;align-items:flex-start;margin:0 0 10px;padding:10px 12px;border-radius:12px;
+  background:#FFF8EC;border:1px solid #FFE4BC;color:#8A5200;font-size:11.5px;line-height:1.5;font-weight:650}
+.warn-bar svg{flex:none;margin-top:1px;color:#C97A0A}
+.warn-bar small{color:#A97630;font-weight:600}
+
+/* -------- 드래그 */
+.drag-handle{width:26px;height:30px;border-radius:8px;border:0;background:#F5F7FB;color:var(--sub-2);
+  display:grid;place-items:center;flex:none;touch-action:none;cursor:grab;padding:0}
+.drag-handle:active{cursor:grabbing;color:var(--blue-d);background:var(--blue-l)}
+.tl-item.dragging{z-index:30}
+.tl-item.dragging .tl-card{box-shadow:0 16px 34px rgba(24,42,80,.22);border-color:#BFD8FF;opacity:.97}
+.tl-item.drop-hint .tl-card{outline:2px dashed var(--blue);outline-offset:2px;background:#F7FAFF}
+body.dragging{user-select:none;-webkit-user-select:none}
+
+/* -------- 장소 검색 */
+.place-box{border:1px solid #DDE8FA;background:linear-gradient(160deg,#F7FAFF,#FFFFFF);
+  border-radius:14px;padding:10px 11px 8px;margin-bottom:14px}
+.pl-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.pl-head .fl{margin:0}
+.pl-modes{display:flex;gap:3px;margin-left:auto;background:#EDF2FA;border-radius:8px;padding:2px}
+.pl-mode{border:0;background:none;height:24px;padding:0 8px;border-radius:6px;
+  font-size:10.5px;font-weight:750;color:var(--sub)}
+.pl-mode.active{background:#fff;color:var(--blue-d);box-shadow:0 1px 4px rgba(30,60,120,.12)}
+.pl-results{margin-top:7px;display:flex;flex-direction:column;gap:4px;max-height:196px;overflow-y:auto}
+.pl-loading{font-size:11.5px;color:var(--sub-2);padding:8px 2px;font-weight:650}
+.pl-row{display:flex;align-items:center;gap:8px;width:100%;padding:8px 9px;border-radius:10px;
+  border:1px solid #E6ECF7;background:#fff;text-align:left}
+.pl-row.active{border-color:var(--blue);background:#F2F7FF}
+.pl-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.pl-name{font-size:12.5px;font-weight:750;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-addr{font-size:10.5px;color:var(--sub);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-src{flex:none;font-size:9.5px;font-weight:800;border-radius:5px;padding:2px 5px}
+.pl-src.k{background:#FFF6E0;color:#8A6100}
+.pl-src.o{background:#E8F8F3;color:#00806E}
+.pl-picked{display:flex;align-items:center;gap:8px;margin-top:8px;padding:7px 9px;border-radius:11px;
+  background:#EAF2FF;border:1px solid #C9DCFF}
+.pl-picked.hide{display:none}
+.pp-dot{width:26px;height:26px;border-radius:8px;background:#fff;display:grid;place-items:center;color:var(--blue-d);flex:none}
+.pp-tx{flex:1;min-width:0;display:flex;flex-direction:column}
+.pp-tx b{font-size:12.5px;font-weight:750;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-tx small{font-size:10.5px;color:var(--blue-d);opacity:.8;margin-top:1px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-src{flex:none;font-size:9.5px;font-weight:800;color:var(--blue-d);background:#fff;border-radius:5px;padding:2px 5px}
+
+/* -------- 환율 자동 · 실청구액 */
+.rate-line{display:flex;align-items:center;gap:8px;margin-top:5px}
+.rate-line .tiny{flex:1;min-width:0;line-height:1.4}
+.rate-line .btn{flex:none}
+.charged-wrap{padding:2px 0 10px}
+.charged-wrap.hide{display:none}
+#charged-block.hide{display:none}
+.charge-card{border:1px solid var(--line)}
+.exp-amt .b.charge{color:#00927E;font-weight:750}
+
+/* -------- 예약 초안 · 보관함 */
+.res-text{min-height:118px;font-size:13.5px;line-height:1.5}
+.res-preview{margin-top:4px}
+.res-row{display:flex;gap:8px;align-items:flex-start;padding:9px 0;border-bottom:1px solid #F1F4F9}
+.res-row:last-child{border-bottom:0}
+.res-row .box{width:24px;height:24px;border-radius:7px;border:1.6px solid #D6DFEC;background:#fff;
+  display:grid;place-items:center;flex:none;color:transparent;margin-top:2px}
+.res-row.on .box{background:var(--blue);border-color:var(--blue);color:#fff}
+.res-body{flex:1;min-width:0}
+.res-body .input{height:38px;font-size:13px;font-weight:650}
+.res-meta{display:flex;gap:5px;align-items:center;margin-top:5px}
+.res-kind{flex:none;font-size:9.5px;font-weight:800;color:var(--blue-d);background:var(--blue-l);
+  border-radius:5px;padding:3px 6px}
+.res-meta .res-day{flex:1;height:34px;font-size:11.5px;padding:0 8px}
+.res-meta .res-time{width:76px;flex:none;height:34px;font-size:11.5px;text-align:center;padding:0 6px}
+.res-saved{display:flex;align-items:center;gap:7px;padding:8px 0;border-bottom:1px solid #F1F4F9}
+.res-saved:last-child{border-bottom:0}
+.res-saved .rs-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.res-saved b{font-size:12.5px;font-weight:750;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res-saved small{font-size:10.5px;color:var(--sub-2);margin-top:1px}
+.res-saved .btn.xs{height:28px;padding:0 9px;font-size:11px}
+
+/* -------- 다른 날로 (카드 액션) */
+.day-pick-list{display:flex;flex-direction:column;gap:5px;margin-top:10px}
+.day-pick{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:11px;
+  border:1px solid var(--line);background:#fff;text-align:left}
+.day-pick b{font-size:13px;font-weight:750}
+.day-pick small{font-size:11px;color:var(--sub);margin-left:4px;flex:1}
+.day-pick svg{color:var(--sub-2)}
+.day-pick:active{background:var(--blue-l)}

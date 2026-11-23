@@ -348,14 +348,71 @@
   };
 
   /* ============================================================== 일정 */
+  function P() { return TL.Places || {}; }
+
+  function pickedHtml(p) {
+    if (!p) return '';
+    return '<span class="pp-dot">' + UI.icon('pin', 14) + '</span>' +
+      '<span class="pp-tx"><b>' + UI.esc(p.name || '') + '</b>' +
+      (p.address ? '<small>' + UI.esc(p.address) + '</small>' : '') + '</span>' +
+      '<span class="pp-src">' + (p.source === 'osm' ? 'OSM' : p.source === 'kakao' ? '카카오' : '직접') + '</span>' +
+      '<button type="button" class="icon-btn sm" data-action="pl-clear" aria-label="장소 선택 해제">' + UI.icon('close', 15) + '</button>';
+  }
+
+  function placeBoxHtml(p) {
+    var mode = P().mode || 'auto';
+    var modes = [['auto', '자동'], ['kakao', '카카오'], ['osm', '해외 OSM']];
+    return '<div class="place-box">' +
+      '<div class="pl-head"><span class="fl">장소 검색</span><span class="pl-modes">' +
+        modes.map(function (m) {
+          return '<button type="button" class="pl-mode' + (mode === m[0] ? ' active' : '') + '" data-action="pl-mode" data-mode="' + m[0] + '">' + m[1] + '</button>';
+        }).join('') +
+      '</span></div>' +
+      '<div class="inline-add" style="margin-top:0">' +
+        '<input class="input" id="pl_q" placeholder="예: 강남역 · 도톤보리 · Namba" autocomplete="off" enterkeyhint="search">' +
+        '<button type="button" class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="pl-search">검색</button>' +
+      '</div>' +
+      '<div id="pl-results" class="pl-results"></div>' +
+      '<div id="pl-picked" class="pl-picked' + (p ? '' : ' hide') + '">' + pickedHtml(p) + '</div>' +
+      '<div class="hintline">국내는 카카오, 해외는 OpenStreetMap. 검색이 안 되면 직접 입력해도 돼요.</div>' +
+    '</div>';
+  }
+
+  D.renderPlaceResults = function (out) {
+    var box = document.getElementById('pl-results');
+    if (!box) return;
+    if (!out) { box.innerHTML = ''; return; }
+    if (!out.results || !out.results.length) {
+      box.innerHTML = '<div class="hintline">' + UI.esc(out.note || '결과가 없어요') + '</div>';
+      return;
+    }
+    dlg.results = out.results;
+    var render = P().resultHtml || function (r) {
+      return '<span class="pl-main"><b>' + UI.esc(r.name) + '</b><small>' + UI.esc(r.address) + '</small></span>';
+    };
+    box.innerHTML = (out.note ? '<div class="hintline">' + UI.esc(out.note) + '</div>' : '') +
+      out.results.map(function (r, i) {
+        return '<button type="button" class="pl-row" data-action="pl-pick" data-idx="' + i + '">' + render(r) + '</button>';
+      }).join('');
+  };
+
   D.schedule = function (trip, id, dayKey) {
     var item = null;
     ((trip.data && trip.data.schedules) || []).forEach(function (s) { if (s.id === id) item = s; });
     if (id && !item) { UI.toast('일정을 찾을 수 없어요'); return; }
-    dlg = { kind: 'schedule', id: id || null, trip: trip };
+    dlg = {
+      kind: 'schedule', id: id || null, trip: trip, results: null,
+      picked: item && (Core.hasGeo(item) || item.placeName || item.address)
+        ? {
+          name: item.placeName || item.place || item.title || '', address: item.address || '',
+          lat: item.lat, lng: item.lng, url: item.placeUrl || '', source: item.source || ''
+        }
+        : null
+    };
     D.trip = trip;
     var day = item ? item.dayKey : (dayKey || TL.App.view.day || 'd1');
     var html = '';
+    html += placeBoxHtml(dlg.picked);
     html += '<div class="form-row"><label class="fl">날짜</label><select class="input" id="f_day">' +
       Core.dayList(trip).map(function (d) {
         return '<option value="' + d.key + '"' + (d.key === day ? ' selected' : '') + '>' + d.label +
@@ -368,36 +425,163 @@
       Core.SCHED_CATS.map(function (c) {
         return '<option value="' + c.key + '"' + (item && item.category === c.key ? ' selected' : '') + '>' + c.label + '</option>';
       }).join('') + '</select></div></div>';
-    html += '<div class="form-row"><label class="fl">장소 · 일정 이름</label>' +
+    html += '<div class="form-row"><label class="fl">일정 이름</label>' +
       '<input class="input" id="f_title" placeholder="예: 도톤보리 산책" maxlength="60" value="' + UI.esc(item ? item.title : '') + '"></div>';
     html += '<div class="form-row"><label class="fl">지도에 검색할 장소명 <span style="font-weight:500">(선택)</span></label>' +
       '<input class="input" id="f_place" placeholder="비우면 위 이름으로 검색해요" maxlength="60" value="' + UI.esc(item ? (item.place || '') : '') + '"></div>';
     html += '<div class="form-row"><label class="fl">메모</label>' +
       '<textarea class="input" id="f_memo" placeholder="예약 시간, 팁, 챙길 것" maxlength="300">' + UI.esc(item ? (item.memo || '') : '') + '</textarea></div>';
+    if (item) {
+      html += '<div class="form-row"><label class="fl">다른 날로</label>' +
+        '<div class="inline-add" style="margin-top:0">' +
+          '<select class="input" id="f_to_day">' + Core.dayList(trip).filter(function (d) { return d.key !== item.dayKey; }).map(function (d) {
+            return '<option value="' + d.key + '">' + d.label + (d.date ? ' · ' + Core.isoLabel(d.date) : ' (출발 전)') + '</option>';
+          }).join('') + '</select>' +
+          '<button type="button" class="btn btn-soft" style="width:auto;height:44px;padding:0 12px;flex:none" data-action="sched-move-day">이동</button>' +
+          '<button type="button" class="btn btn-ghost" style="width:auto;height:44px;padding:0 12px;flex:none" data-action="sched-copy-day">복사</button>' +
+        '</div>' +
+        '<div class="hintline">이동하면 이 날에서 빠지고, 복사하면 원본이 남아요.</div>' +
+      '</div>';
+    }
     html += '<div class="sheet-foot">' +
       (item ? '<button class="btn btn-danger" data-action="del-schedule" data-id="' + UI.esc(item.id) + '">삭제</button>' : '') +
       '<button class="btn btn-primary" data-action="save-schedule">' + (item ? '저장' : '추가') + '</button></div>';
     open(html, item ? '일정 수정' : '일정 추가');
   };
 
+  A['pl-mode'] = function (el) {
+    var m = el.getAttribute('data-mode');
+    if (!TL.Places) return;
+    TL.Places.mode = m;
+    UI.$$('.pl-mode').forEach(function (b) { b.classList.toggle('active', b === el); });
+  };
+  A['pl-search'] = function () {
+    var qEl = document.getElementById('pl_q');
+    var q = qEl ? qEl.value.trim() : '';
+    var box = document.getElementById('pl-results');
+    if (!q) { if (qEl) qEl.focus(); UI.toast('장소 이름을 입력해 주세요'); return; }
+    if (!TL.Places) { UI.toast('장소 검색을 쓸 수 없어요'); return; }
+    if (box) box.innerHTML = '<div class="pl-loading">검색 중…</div>';
+    TL.Places.search(q).then(function (out) {
+      D.renderPlaceResults(out);
+      if (!out.results.length && out.note) UI.toast(out.note, 3000);
+    }).catch(function (e) {
+      D.renderPlaceResults({ results: [], note: (e && e.message) || '검색에 실패했어요' });
+    });
+  };
+  A['pl-pick'] = function (el) {
+    var i = Number(el.getAttribute('data-idx'));
+    var r = (dlg.results || [])[i];
+    if (!r) return;
+    dlg.picked = { name: r.name, address: r.address, lat: r.lat, lng: r.lng, url: r.url, source: r.source };
+    var chip = document.getElementById('pl-picked');
+    if (chip) { chip.innerHTML = pickedHtml(dlg.picked); chip.classList.remove('hide'); }
+    var titleEl = document.getElementById('f_title');
+    if (titleEl && !titleEl.value.trim()) titleEl.value = r.name;
+    var placeEl = document.getElementById('f_place');
+    if (placeEl) placeEl.value = r.name;
+    UI.$$('.pl-row').forEach(function (b) { b.classList.remove('active'); });
+    el.classList.add('active');
+    UI.toast(r.name + ' 선택');
+  };
+  A['pl-clear'] = function () {
+    dlg.picked = null;
+    var chip = document.getElementById('pl-picked');
+    if (chip) { chip.innerHTML = ''; chip.classList.add('hide'); }
+  };
+
   A['save-schedule'] = function () {
     var trip = tripOf() || TL.App.currentTrip();
     if (!trip) { UI.toast('여행 정보를 찾을 수 없어요'); return; }
     var title = UI.val('f_title').trim();
+    if (!title && dlg.picked) title = dlg.picked.name;
     if (!title) { UI.toast('장소나 일정 이름을 입력해 주세요'); return; }
+    var manualPlace = UI.val('f_place').trim();
+    var p = dlg.picked;
     var payload = {
       dayKey: UI.val('f_day') || 'prep',
       time: Core.normTime(UI.val('f_time')),
       title: title,
       category: UI.val('f_cat') || 'etc',
-      place: UI.val('f_place').trim(),
+      place: p ? p.name : manualPlace,
+      placeName: p ? p.name : '',
+      address: p ? (p.address || '') : '',
+      placeUrl: p ? (p.url || '') : '',
+      lat: p ? Number(p.lat) : null,
+      lng: p ? Number(p.lng) : null,
+      source: p ? (p.source || '') : '',
       memo: UI.val('f_memo').trim()
     };
-    if (dlg.id) Store.update(trip.id, 'schedules', dlg.id, payload);
-    else Store.add(trip.id, 'schedules', payload);
+    var saved = dlg.id ? Store.update(trip.id, 'schedules', dlg.id, payload) : Store.add(trip.id, 'schedules', payload);
+    var pairs = Core.overlapPairs(Core.sortedSchedules(trip.data, payload.dayKey))
+      .filter(function (x) { return saved && (x.aId === saved.id || x.bId === saved.id); });
     UI.close();
     TL.App.view.day = payload.dayKey;
-    UI.toast(dlg.id ? '수정했어요' : '일정을 추가했어요');
+    if (pairs.length) {
+      UI.toast((dlg.id ? '수정했어요' : '일정을 추가했어요') + ' · 시간이 겹치는 일정이 ' + pairs.length + '개 있어요', 3400);
+    } else {
+      UI.toast(dlg.id ? '수정했어요' : '일정을 추가했어요');
+    }
+  };
+
+  /* 다른 날로 이동/복사 */
+  A['sched-move-day'] = function () {
+    var trip = tripOf() || TL.App.currentTrip();
+    var to = UI.val('f_to_day');
+    if (!trip || !dlg.id || !to) return;
+    Store.moveScheduleToDay(trip.id, dlg.id, to);
+    UI.close();
+    TL.App.view.day = to;
+    UI.toast(Core.dayLabel(trip, to) + '로 옮겼어요');
+  };
+  A['sched-copy-day'] = function () {
+    var trip = tripOf() || TL.App.currentTrip();
+    var to = UI.val('f_to_day');
+    if (!trip || !dlg.id || !to) return;
+    var copy = Store.copySchedule(trip.id, dlg.id, to);
+    UI.close();
+    TL.App.view.day = to;
+    UI.toast(copy ? Core.dayLabel(trip, to) + '에 복사했어요' : '복사하지 못했어요');
+  };
+
+  /** 카드의 복사 버튼 → 날짜 고르기 시트 */
+  D.dayPicker = function (trip, id, mode) {
+    var item = null;
+    ((trip.data && trip.data.schedules) || []).forEach(function (s) { if (s.id === id) item = s; });
+    if (!item) return;
+    dlg = { kind: 'day-pick', id: id, trip: trip };
+    D.trip = trip;
+    var html = '<div class="note">“' + UI.esc(item.title) + '” 일정을 어느 날로 ' + (mode === 'move' ? '옮길까요?' : '복사할까요?') + '</div>' +
+      '<div class="day-pick-list">' + Core.dayList(trip).filter(function (d) { return d.key !== item.dayKey; }).map(function (d) {
+        return '<button class="day-pick" data-action="quick-day" data-day="' + d.key + '" data-mode="' + (mode || 'copy') + '">' +
+          '<b>' + d.label + '</b><small>' + (d.date ? Core.isoLabel(d.date) : '출발 전') + '</small>' +
+          UI.icon('swap', 16) + '</button>';
+      }).join('') + '</div>' +
+      '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">닫기</button></div>';
+    open(html, mode === 'move' ? '다른 날로 이동' : '다른 날로 복사');
+  };
+  A['copy-schedule'] = function (el) {
+    var trip = TL.App.currentTrip();
+    if (trip) D.dayPicker(trip, el.getAttribute('data-id'), 'copy');
+  };
+  A['move-schedule-day'] = function (el) {
+    var trip = TL.App.currentTrip();
+    if (trip) D.dayPicker(trip, el.getAttribute('data-id'), 'move');
+  };
+  A['quick-day'] = function (el) {
+    var trip = dlg.trip || TL.App.currentTrip();
+    var day = el.getAttribute('data-day');
+    var mode = el.getAttribute('data-mode');
+    if (!trip || !dlg.id || !day) return;
+    if (mode === 'move') {
+      Store.moveScheduleToDay(trip.id, dlg.id, day);
+      UI.toast(Core.dayLabel(trip, day) + '로 옮겼어요');
+    } else {
+      Store.copySchedule(trip.id, dlg.id, day);
+      UI.toast(Core.dayLabel(trip, day) + '에 복사했어요');
+    }
+    UI.close();
+    TL.App.view.day = day;
   };
 
   A['del-schedule'] = function (el) {
@@ -411,6 +595,68 @@
   };
 
   /* ============================================================== 지출 */
+  var rateFetch = { loading: false, error: '' };
+
+  function rateStatusText() {
+    var c = Store.rateCache();
+    if (!c.fetchedAt) return '';
+    return new Date(c.fetchedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function setRateStatus(txt) {
+    var el = document.getElementById('rate-status');
+    if (el) el.textContent = txt;
+  }
+
+  /** 고른 통화의 환율을 자동으로 채운다 (캐시 12시간, 없으면 API 호출) */
+  function applyAutoRate(cur, force) {
+    var rateEl = document.getElementById('f_rate');
+    if (cur === 'KRW') { setRateStatus('원화로 기록돼요'); return; }
+    var cached = force ? 0 : Store.cachedAutoRate(cur);
+    if (cached && rateEl) {
+      rateEl.value = cached;
+      setRateStatus('자동 환율 · ' + rateStatusText() + ' 기준');
+      updateExpensePreview();
+      return;
+    }
+    if (!rateEl) return;
+    rateEl.value = Store.tripRate(tripOf(), cur);
+    fetchRates(cur);
+  }
+
+  function fetchRates(cur) {
+    var target = cur || UI.val('f_currency') || 'KRW';
+    if (target === 'KRW') return;
+    if (navigator.onLine === false) { setRateStatus('오프라인 · 기본 환율을 써요'); return; }
+    if (rateFetch.loading) return;
+    rateFetch.loading = true;
+    setRateStatus('자동 환율 불러오는 중…');
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 9000) : null;
+    fetch('https://open.er-api.com/v6/latest/KRW', { signal: ctrl ? ctrl.signal : undefined })
+      .then(function (res) { return res.json(); })
+      .then(function (json) {
+        if (timer) clearTimeout(timer);
+        rateFetch.loading = false;
+        var rates = Core.ratesFromERAPI(json);
+        if (!rates || !rates[target]) throw new Error('환율을 읽지 못했어요');
+        Store.setRateCache(rates);
+        var rateEl = document.getElementById('f_rate');
+        var curNow = UI.val('f_currency') || 'KRW';
+        if (rateEl && curNow !== 'KRW' && rates[curNow]) {
+          rateEl.value = rates[curNow];
+          setRateStatus('자동 환율 · ' + rateStatusText() + ' 기준');
+          updateExpensePreview();
+        }
+      })
+      .catch(function (e) {
+        if (timer) clearTimeout(timer);
+        rateFetch.loading = false;
+        rateFetch.error = (e && e.message) || '실패';
+        setRateStatus('자동 환율 실패 · 기본 환율을 써요');
+      });
+  }
+
   D.expense = function (trip, id) {
     var item = null;
     ((trip.data && trip.data.expenses) || []).forEach(function (e) { if (e.id === id) item = e; });
@@ -425,14 +671,11 @@
       sharedWith: item ? (item.sharedWith || []).slice() : members.map(function (m) { return m.id; }),
       payerId: item ? (item.payerId || me) : me,
       private: item ? !!item.private : false,
+      chargedOn: !!(item && Number(item.chargedKRW) > 0),
       dayKey: wantDay
     };
     D.trip = trip;
-    var cur = item ? item.currency : (trip.baseCurrency && trip.baseCurrency !== 'KRW' ? trip.baseCurrency : (trip.baseCurrency || 'KRW'));
-    if (!item) {
-      // 여행 기본 통화가 외화면 그 통화를 먼저 보여준다
-      cur = trip.baseCurrency || 'KRW';
-    }
+    var cur = item ? item.currency : (trip.baseCurrency || 'KRW');
     var rate = item ? (item.rate || Store.tripRate(trip, cur)) : Store.tripRate(trip, cur);
     var html = '';
     html += '<div class="form-row"><label class="fl">날짜</label><select class="input" id="f_day">' +
@@ -451,6 +694,8 @@
         '<div style="flex:1.4" id="rate-wrap"><input class="input" id="f_rate" inputmode="decimal" placeholder="환율" value="' +
           (cur === 'KRW' ? '' : rate) + '"' + (cur === 'KRW' ? ' disabled' : '') + '></div>' +
       '</div>' +
+      '<div class="rate-line"><span class="tiny muted" id="rate-status">' + (cur === 'KRW' ? '원화로 기록돼요' : '1 ' + cur + ' = ' + rate + '원') + '</span>' +
+        '<button type="button" class="btn xs btn-ghost" data-action="refresh-rate">' + (TL.UI.icon ? '자동 환율' : '환율') + '</button></div>' +
       '<div class="hintline" id="f_preview">' + (cur === 'KRW' ? '원화로 기록돼요' : '1 ' + cur + ' = ' + rate + '원 · 환율은 직접 고칠 수 있어요') + '</div>' +
     '</div>';
 
@@ -484,6 +729,15 @@
       '<div class="switch-row"><span class="tx"><b>나만 보기</b><span>정산에서 빼고 내 지출로만 기록</span></span>' +
       '<button class="switch' + (dlg.private ? ' on' : '') + '" data-action="toggle-private" aria-label="나만 보기"></button></div></div>';
 
+    html += '<div class="card flat' + (cur === 'KRW' ? ' hide' : '') + '" id="charged-block" style="border:1px solid var(--line);padding:2px 13px;margin-bottom:12px">' +
+      '<div class="switch-row"><span class="tx"><b>카드 실청구액으로 덮어쓰기</b><span>실제 청구된 원화 금액으로 합계·정산을 계산해요</span></span>' +
+      '<button class="switch' + (dlg.chargedOn ? ' on' : '') + '" data-action="toggle-charged" aria-label="카드 실청구액 사용"></button></div>' +
+      '<div id="charged-wrap" class="charged-wrap' + (dlg.chargedOn ? '' : ' hide') + '">' +
+        '<div class="money-in"><input class="input" id="f_charged" inputmode="numeric" placeholder="예: 36500" value="' +
+          (item && item.chargedKRW ? item.chargedKRW : '') + '"><span class="cur">원</span></div>' +
+        '<div class="hintline">외화 금액·통화는 그대로 남고, 합계와 정산만 실청구액 기준이 돼요.</div>' +
+      '</div></div>';
+
     html += '<div class="form-row"><label class="fl">메모 <span style="font-weight:500">(선택)</span></label>' +
       '<input class="input" id="f_memo" placeholder="예: 3명 세트" maxlength="100" value="' + UI.esc(item ? (item.memo || '') : '') + '"></div>';
 
@@ -492,6 +746,7 @@
       '<button class="btn btn-primary" data-action="save-expense">' + (item ? '저장' : '추가') + '</button></div>';
     open(html, item ? '지출 수정' : '지출 추가');
     updateExpensePreview();
+    if (!item && cur !== 'KRW') applyAutoRate(cur, false);
   };
 
   function updateExpensePreview() {
@@ -501,19 +756,39 @@
     var prev = document.getElementById('f_preview');
     var lab = document.getElementById('f_cur_label');
     var rw = document.getElementById('rate-wrap');
+    var chargedBlock = document.getElementById('charged-block');
     if (!amountEl || !curEl) return;
     var cur = curEl.value;
     if (lab) lab.textContent = Core.curInfo(cur).symbol;
     if (rw) rw.style.opacity = cur === 'KRW' ? '.45' : '1';
     if (rateEl) rateEl.disabled = cur === 'KRW';
+    if (chargedBlock) chargedBlock.classList.toggle('hide', cur === 'KRW');
     var amt = Core.num(amountEl.value, 0);
     if (!prev) return;
     if (cur === 'KRW') { prev.textContent = '원화로 기록돼요'; return; }
     var rate = Core.num(rateEl && rateEl.value, 0) || Store.tripRate(tripOf(), cur);
-    prev.innerHTML = '1 ' + cur + ' = ' + Core.fmt(rate, 2) + '원 · 환산 <b>' + Core.won(Core.toKRW(amt, cur, null, rate)) + '</b>';
+    var charged = dlg.chargedOn ? Core.num((document.getElementById('f_charged') || {}).value, 0) : 0;
+    if (charged > 0) {
+      prev.innerHTML = '1 ' + cur + ' = ' + Core.fmt(rate, 2) + '원 · 추정 <s>' + Core.won(Core.toKRW(amt, cur, null, rate)) + '</s> → <b>실청구 ' + Core.won(charged) + '</b>으로 정산';
+    } else {
+      prev.innerHTML = '1 ' + cur + ' = ' + Core.fmt(rate, 2) + '원 · 환산 <b>' + Core.won(Core.toKRW(amt, cur, null, rate)) + '</b>';
+    }
   }
   D.updateExpensePreview = updateExpensePreview;
+  D.autoRate = applyAutoRate;
 
+  A['refresh-rate'] = function () { fetchRates(UI.val('f_currency')); };
+  A['toggle-charged'] = function (el) {
+    dlg.chargedOn = !dlg.chargedOn;
+    el.classList.toggle('on', dlg.chargedOn);
+    var w = document.getElementById('charged-wrap');
+    if (w) w.classList.toggle('hide', !dlg.chargedOn);
+    if (dlg.chargedOn) {
+      var i = document.getElementById('f_charged');
+      if (i) setTimeout(function () { i.focus(); }, 40);
+    }
+    updateExpensePreview();
+  };
   A['pick-exp-cat'] = function (el) {
     UI.$$('#cat-chips .opt').forEach(function (b) { b.classList.remove('active'); });
     el.classList.add('active');
@@ -560,11 +835,14 @@
     var members = trip.members || [];
     var shared = dlg.sharedWith.filter(function (id) { return members.some(function (m) { return m.id === id; }); });
     if (!dlg.private && !shared.length) shared = members.map(function (m) { return m.id; });
+    var charged = 0;
+    if (dlg.chargedOn && currency !== 'KRW') charged = Math.round(Core.num(UI.val('f_charged'), 0));
     var payload = {
       dayKey: UI.val('f_day') || 'prep',
       amount: amount,
       currency: currency,
       rate: rate,
+      chargedKRW: charged > 0 ? charged : 0,
       category: category,
       title: title,
       payerId: dlg.payerId || (members[0] && members[0].id) || '',
@@ -575,17 +853,8 @@
     if (dlg.id) Store.update(trip.id, 'expenses', dlg.id, payload);
     else Store.add(trip.id, 'expenses', payload);
     UI.close();
-    UI.toast(dlg.id ? '수정했어요' : '지출을 기록했어요');
-  };
-
-  A['del-expense'] = function (el) {
-    var trip = tripOf() || TL.App.currentTrip();
-    var id = el.getAttribute('data-id') || dlg.id;
-    if (!trip || !id) return;
-    if (!confirm('이 지출을 삭제할까요?')) return;
-    Store.remove(trip.id, 'expenses', id);
-    UI.close();
-    UI.toast('삭제했어요');
+    if (charged > 0) UI.toast((dlg.id ? '수정했어요' : '지출을 기록했어요') + ' · 실청구 ' + Core.won(charged) + ' 기준', 2800);
+    else UI.toast(dlg.id ? '수정했어요' : '지출을 기록했어요');
   };
 
   /* ============================================================ 체크리스트 */

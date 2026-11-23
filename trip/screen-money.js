@@ -162,9 +162,11 @@
     var cat = Core.expCat(e.category);
     var krw = Core.expenseKRW(e, trip);
     var foreign = e.currency && e.currency !== 'KRW';
+    var charged = Number(e.chargedKRW) > 0;
     var payer = Store.memberName(trip, e.payerId) || '결제자 미정';
     var shared = (e.sharedWith && e.sharedWith.length) ? e.sharedWith.length : (trip.members || []).length;
     var subs = [Core.dayLabel(trip, e.dayKey), payer, e.private ? '나만 보기' : shared + '명 함께'];
+    if (charged && foreign) subs.push('추정 ' + Core.won(Core.toKRW(e.amount, e.currency, trip.rates, e.rate)));
     return '<button class="exp-row" data-action="edit-expense" data-id="' + UI.esc(e.id) + '" style="width:100%;background:none;border:0;border-bottom:1px solid #F1F4F9;text-align:left">' +
       '<span class="exp-ic" style="background:' + cat.color + '">' + UI.icon(cat.icon, 19) + '</span>' +
       '<span class="exp-main">' +
@@ -173,7 +175,8 @@
       '</span>' +
       '<span class="exp-amt">' +
         '<span class="a">' + (foreign ? Core.amtLabel(e.amount, e.currency) : Core.won(e.amount)) + '</span>' +
-        (foreign ? '<span class="b">' + Core.won(krw) + '</span>' : '') +
+        (charged ? '<span class="b charge">카드 ' + Core.won(e.chargedKRW) + '</span>' :
+          (foreign ? '<span class="b">' + Core.won(krw) + '</span>' : '')) +
       '</span>' +
     '</button>';
   };

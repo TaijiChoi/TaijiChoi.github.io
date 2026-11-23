@@ -11,7 +11,7 @@
   var KEY = 'triplog.v1';
   var FB_VERSION = '10.12.2';
   var FB_BASE = 'https://www.gstatic.com/firebasejs/' + FB_VERSION + '/';
-  var COLLS = ['schedules', 'expenses', 'checklist'];
+  var COLLS = ['schedules', 'expenses', 'checklist', 'reservations'];
 
   var listeners = [];
   var app = null;          // firebase app
@@ -29,6 +29,7 @@
       nickname: '',
       firebase: null,
       defaultRates: Object.assign({}, Core.DEFAULT_RATES),
+      ratesCache: { fetchedAt: 0, rates: {} },
       meByTrip: {},
       seenWelcome: false
     };
@@ -43,6 +44,8 @@
       var s = Object.assign(blank(), parsed || {});
       if (!Array.isArray(s.trips)) s.trips = [];
       if (!s.meByTrip || typeof s.meByTrip !== 'object' || Array.isArray(s.meByTrip)) s.meByTrip = {};
+      if (!s.ratesCache || typeof s.ratesCache !== 'object') s.ratesCache = { fetchedAt: 0, rates: {} };
+      if (!s.ratesCache.rates || typeof s.ratesCache.rates !== 'object') s.ratesCache.rates = {};
       s.trips.forEach(function (t) {
         if (!t.data) t.data = {};
         COLLS.forEach(function (c) { if (!Array.isArray(t.data[c])) t.data[c] = []; });
@@ -108,7 +111,7 @@
       }),
       rates: Object.assign({}, state.defaultRates || {}, input.rates || {}),
       createdAt: new Date().toISOString(),
-      data: { schedules: [], expenses: [], checklist: [] }
+      data: { schedules: [], expenses: [], checklist: [], reservations: [] }
     };
     if (!trip.members.length) trip.members = [{ id: Core.uid('m'), name: state.nickname || '나' }];
     state.trips.push(trip);
@@ -442,6 +445,96 @@
     notify();
   };
 
+  /** 드래그 앤 드롭: 같은 날 안에서 id를 toIndex 위치로 옮긴다 */
+  Store.reorderSchedule = function (tripId, dayKey, id, toIndex) {
+    var trip = Store.trip(tripId);
+    if (!trip) return;
+    var group = Core.sortedSchedules(trip.data, dayKey);
+    var from = -1;
+    group.forEach(function (s, i) { if (s.id === id) from = i; });
+    if (from < 0) return;
+    var item = group.splice(from, 1)[0];
+    var idx = Core.clamp(Math.round(Number(toIndex) || 0), 0, group.length);
+    group.splice(idx, 0, item);
+    group.forEach(function (it, i) {
+      if (it.order !== i) {
+        it.order = i;
+        if (trip.remoteCode) remoteWrite(trip, [trip.remoteCode, 'schedules', it.id], stripId(it));
+      }
+    });
+    notify();
+  };
+  /** 일정을 다른 날로 복사한다 (새 일정, 원본 유지) */
+  Store.copySchedule = function (tripId, id, dayKey) {
+    var trip = Store.trip(tripId);
+    if (!trip) return null;
+    var src = null;
+    (trip.data.schedules || []).forEach(function (s) { if (s.id === id) src = s; });
+    if (!src) return null;
+    var copy = {};
+    Object.keys(src).forEach(function (k) {
+      if (k === 'id' || k === 'createdAt' || k === 'order') return;
+      copy[k] = src[k];
+    });
+    if (dayKey) copy.dayKey = dayKey;
+    return Store.add(tripId, 'schedules', copy);
+  };
+  /** 일정을 다른 날로 옮긴다 (그 날의 맨 뒤로) */
+  Store.moveScheduleToDay = function (tripId, id, dayKey) {
+    if (!dayKey) return null;
+    return Store.update(tripId, 'schedules', id, { dayKey: dayKey });
+  };
+  Store.addSchedulesBulk = function (tripId, list) {
+    var out = [];
+    (list || []).forEach(function (it) {
+      var added = Store.add(tripId, 'schedules', it);
+      if (added) out.push(added);
+    });
+    return out;
+  };
+  /** 일정의 시간 겹침 (같은 날 기준) */
+  Store.overlapsFor = function (trip, dayKey, durMin) {
+    if (!trip) return [];
+    return Core.overlapPairs(Core.sortedSchedules(trip.data, dayKey), durMin);
+  };
+
+  /* ------------------------------------------------------- 환율 캐시 */
+  Store.rateCache = function () {
+    var c = (state && state.ratesCache) || {};
+    return { fetchedAt: Number(c.fetchedAt) || 0, rates: Object.assign({}, c.rates || {}) };
+  };
+  Store.setRateCache = function (rates) {
+    if (!rates || typeof rates !== 'object') return;
+    state.ratesCache = {
+      fetchedAt: Date.now(),
+      rates: Object.assign({}, (state.ratesCache && state.ratesCache.rates) || {}, rates)
+    };
+    notify();
+  };
+  /** 캐시가 신선하면 자동 환율, 아니면 0 */
+  Store.cachedAutoRate = function (code, maxAgeMs) {
+    var c = Store.rateCache();
+    var age = Date.now() - c.fetchedAt;
+    var limit = maxAgeMs == null ? 12 * 3600 * 1000 : maxAgeMs;
+    var v = Number(c.rates[code]);
+    if (c.fetchedAt && age >= 0 && age <= limit && isFinite(v) && v > 0) return v;
+    return 0;
+  };
+
+  /* ------------------------------------------------------ 연결 상태 */
+  var sync = { online: true, fromCache: false };
+  Store.setOnline = function (v) {
+    if (sync.online === !!v) return;
+    sync.online = !!v;
+    notify();
+  };
+  Store.setFromCache = function (v) {
+    sync.fromCache = !!v;
+  };
+  Store.syncState = function () {
+    return { online: sync.online, fromCache: sync.fromCache, connected: !!(conn && db), code: conn ? conn.code : '' };
+  };
+
   /* -------------------------------------------------------- Firebase sync */
   function withTimeout(p, ms, msg) {
     return new Promise(function (resolve, reject) {
@@ -467,7 +560,19 @@
       var cfg = state.firebase;
       if (!cfg) throw new Error('Firebase 설정이 없습니다. 설정에서 먼저 입력해 주세요.');
       try { app = appMod.getApp('triplog'); } catch (e) { app = appMod.initializeApp(cfg, 'triplog'); }
-      db = fsMod.getFirestore(app);
+      // 오프라인 지속성(IndexedDB) — 지원하지 않거나 이미 초기화된 경우에는 일반 모드로
+      try {
+        if (typeof fsMod.initializeFirestore === 'function' && typeof fsMod.persistentLocalCache === 'function') {
+          var cache = fsMod.persistentLocalCache({
+            tabManager: typeof fsMod.persistentMultipleTabManager === 'function' ? fsMod.persistentMultipleTabManager() : undefined
+          });
+          db = fsMod.initializeFirestore(app, { localCache: cache });
+        } else {
+          db = fsMod.getFirestore(app);
+        }
+      } catch (e) {
+        db = fsMod.getFirestore(app);
+      }
       fs = fsMod;
       return fs;
     });
@@ -525,6 +630,7 @@
             }
             return;
           }
+          Store.setFromCache(!!(snap.metadata && snap.metadata.fromCache));
           var m = snap.data() || {};
           trip.name = m.name || trip.name;
           trip.destination = m.destination || trip.destination;
@@ -559,6 +665,7 @@
         COLLS.forEach(function (coll) {
           var colRef = fsMod.collection(db, 'trips', code, coll);
           conn.unsubs.push(fsMod.onSnapshot(colRef, function (snap) {
+            if (snap.metadata && snap.metadata.fromCache) Store.setFromCache(true);
             trip.data[coll] = snap.docs.map(function (d) {
               var v = d.data() || {};
               v.id = d.id;
@@ -588,7 +695,9 @@
     return {
       connected: !!(conn && db),
       code: conn ? conn.code : '',
-      error: lastError
+      error: lastError,
+      online: sync.online,
+      fromCache: sync.fromCache
     };
   };
   function closeConn() {
@@ -661,7 +770,7 @@
       rates: {},
       remoteCode: code,
       createdAt: new Date().toISOString(),
-      data: { schedules: [], expenses: [], checklist: [] }
+      data: { schedules: [], expenses: [], checklist: [], reservations: [] }
     };
     if (!existing) state.trips.push(trip);
     var prevCurrent = state.currentTripId;
@@ -702,7 +811,7 @@
       baseCurrency: /^[A-Z]{3}$/.test(String(t.baseCurrency || '')) ? t.baseCurrency : 'KRW',
       createdAt: typeof t.createdAt === 'string' ? t.createdAt : new Date().toISOString(),
       rates: {},
-      data: { schedules: [], expenses: [], checklist: [] }
+      data: { schedules: [], expenses: [], checklist: [], reservations: [] }
     };
     if (!out.endDate) out.endDate = out.startDate;
     var r = Core.rangeOrder(out.startDate, out.endDate);
@@ -753,6 +862,13 @@
         title: title,
         category: Core.schedCat(s.category).key,
         place: String(s.place || '').slice(0, 60),
+        placeName: String(s.placeName || '').slice(0, 60),
+        address: String(s.address || '').slice(0, 120),
+        placeUrl: String(s.placeUrl || '').slice(0, 300),
+        lat: isFinite(Number(s.lat)) && Number(s.lat) !== 0 ? Number(s.lat) : null,
+        lng: isFinite(Number(s.lng)) && Number(s.lng) !== 0 ? Number(s.lng) : null,
+        source: s.source === 'kakao' || s.source === 'osm' ? s.source : '',
+        duration: isFinite(Number(s.duration)) && Number(s.duration) > 0 ? Number(s.duration) : 0,
         memo: String(s.memo || '').slice(0, 300),
         createdAt: typeof s.createdAt === 'string' ? s.createdAt : new Date().toISOString()
       };
@@ -778,8 +894,23 @@
         payerId: memIds[e.payerId] ? e.payerId : '',
         sharedWith: shared,
         private: !!e.private,
+        chargedKRW: isFinite(Number(e.chargedKRW)) && Number(e.chargedKRW) > 0 ? Math.round(Number(e.chargedKRW)) : 0,
         memo: String(e.memo || '').slice(0, 100),
         createdAt: typeof e.createdAt === 'string' ? e.createdAt : new Date().toISOString()
+      };
+    }).filter(Boolean);
+
+    var resv = Array.isArray(src.reservations) ? src.reservations : [];
+    out.data.reservations = resv.map(function (r, i) {
+      if (!r || typeof r !== 'object') return null;
+      var text = String(r.text == null ? '' : r.text).slice(0, 4000);
+      if (!text.trim()) return null;
+      return {
+        id: typeof r.id === 'string' && r.id ? r.id : Core.uid('r'),
+        title: String(r.title || '').trim().slice(0, 60) || '예약 메모',
+        text: text,
+        count: isFinite(Number(r.count)) ? Number(r.count) : 0,
+        createdAt: typeof r.createdAt === 'string' ? r.createdAt : new Date().toISOString()
       };
     }).filter(Boolean);
 
