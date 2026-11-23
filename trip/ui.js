@@ -92,7 +92,7 @@
     var rootEl = document.getElementById('modal-root');
     rootEl.innerHTML =
       '<div class="modal" data-action="modal-backdrop">' +
-        '<div class="sheet" role="dialog" aria-modal="true" onclick="event.stopPropagation()">' +
+        '<div class="sheet" role="dialog" aria-modal="true">' +
           '<div class="sheet-handle"></div>' +
           (opts.title ? '<div class="sheet-head"><h3>' + UI.esc(opts.title) + '</h3>' +
             '<button class="icon-btn sm" data-action="close-modal" aria-label="닫기">' + UI.icon('close') + '</button></div>' : '') +

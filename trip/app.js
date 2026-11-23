@@ -141,7 +141,11 @@
     if (act === 'open-trip') { App.openTrip(el.getAttribute('data-id')); return; }
     if (act === 'go-home') { App.goHome(); return; }
     if (act === 'tab') { App.setTab(el.getAttribute('data-tab')); return; }
-    if (act === 'close-modal' || act === 'modal-backdrop') { UI.close(); return; }
+    if (act === 'modal-backdrop') {
+      if (ev.target === el) UI.close();
+      return;
+    }
+    if (act === 'close-modal') { UI.close(); return; }
     if (act === 'pick-day') {
       var day = el.getAttribute('data-day');
       if (App.view.tab === 'schedule') App.view.day = day;
