@@ -38,8 +38,8 @@
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
   var wins = 0, doc = null;
-  function q(sel) { return doc.querySelector(sel); }
-  function qa(sel) { return Array.prototype.slice.call(doc.querySelectorAll(sel)); }
+  function q(sel) { doc = f.contentDocument || doc; return doc.querySelector(sel); }
+  function qa(sel) { doc = f.contentDocument || doc; return Array.prototype.slice.call(doc.querySelectorAll(sel)); }
   async function click(el, wait) {
     if (!el) throw new Error('click target missing');
     el.click();
@@ -111,10 +111,16 @@
 
     // 초기 상태: 이 브라우저 프로필의 이 사이트 테스트 데이터만 비운다
     w.localStorage.clear();
-    f.src = '../index.html?qa=1&t=' + Date.now();   // 캐시된 예전 파일 대신 새로 받는다
-    await sleep(600);
-    for (var i = 0; i < 60 && !ready(); i++) await sleep(80);
+    await new Promise(function (res) {
+      var done = false;
+      function on() { if (done) return; done = true; f.removeEventListener('load', on); res(); }
+      f.addEventListener('load', on);
+      f.src = '../index.html?qa=1&t=' + Date.now();   // 캐시된 예전 파일 대신 새로 받는다
+      setTimeout(function () { if (!done) { done = true; f.removeEventListener('load', on); res(); } }, 8000);
+    });
+    await sleep(200);
     w = f.contentWindow; doc = f.contentDocument;
+    for (var i = 0; i < 60 && !ready(); i++) await sleep(80);
     wins = w.innerWidth;
     w.addEventListener('error', function (e) { errs.push('error: ' + (e.message || e.type)); });
     ok(ready(), '앱이 390x844에서 부팅');
