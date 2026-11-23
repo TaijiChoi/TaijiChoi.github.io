@@ -485,7 +485,11 @@
     var VER = (coreSrc.match(/v=(\d+)/) || [])[1] || '0';
     ok(cacheKeys.indexOf('triplog-v' + VER) >= 0, '앱 셸 캐시 생성 (v' + VER + ')', cacheKeys.join(','));
     var shellHit = false;
-    try { shellHit = !!(await w.caches.match('./core.js?v=' + VER)); } catch (e) {}
+    for (var shi = 0; shi < 40; shi++) {   // 새로 설치한 SW가 캐시를 채울 때까지
+      try { shellHit = !!(await w.caches.match('./core.js?v=' + VER)); } catch (e) {}
+      if (shellHit) break;
+      await sleep(200);
+    }
     ok(shellHit, 'core.js가 캐시에 있음');
     w.dispatchEvent(new w.Event('offline'));
     await sleep(180);
