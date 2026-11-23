@@ -399,7 +399,10 @@ select.input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xml
 .sheet-head{display:flex;align-items:center;gap:8px;margin-bottom:14px}
 .sheet-head h3{font-size:17px;font-weight:800;letter-spacing:-.4px;flex:1}
 .sheet-body{min-height:40px}
-.sheet-foot{display:flex;gap:8px;margin-top:18px}
+.sheet-foot{display:flex;gap:8px;margin-top:16px;position:sticky;bottom:0;z-index:3;
+  padding:10px 0 4px;background:#fff}
+.sheet-foot::before{content:"";position:absolute;left:-18px;right:-18px;top:-14px;height:14px;
+  background:linear-gradient(rgba(255,255,255,0),#fff);pointer-events:none}
 .sheet-foot .btn{flex:1}
 @media (min-width:640px){
   .modal{align-items:center;padding:24px}
