@@ -355,8 +355,8 @@
     // 시간 겹침 경고
     await click(q('.chip[data-day="d2"]'));
     await click(q('.fab'));
-    setv('#f_title', '국밥');
-    setv('#f_time', '1000');
+    setv('#f_title', '김밥');
+    setv('#f_time', '1230');   // d2의 12:00 국밥과 30분 겹침
     await clickSel('[data-action="save-schedule"]');
     ok(!!q('.warn-bar') && text('.warn-bar').indexOf('겹') >= 0, '시간 겹침 안내', text('.warn-bar').slice(0, 50));
     ok(!!q('.tl-warn'), '카드에 겹침 배지');
