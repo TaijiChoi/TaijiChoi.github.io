@@ -25,6 +25,15 @@
     for (var i = 0; i < 100; i++) { if (ready(f)) return true; await sleep(80); }
     return false;
   }
+  function loadFrame(f, src) {
+    return new Promise(function (res) {
+      var done = false;
+      function on() { if (done) return; done = true; f.removeEventListener('load', on); setTimeout(res, 120); }
+      f.addEventListener('load', on);
+      f.src = src;
+      setTimeout(on, 9000);
+    });
+  }
   const RES = '[항공] 대한항공 KE721\n2026년 12월 5일 09:20 인천국제공항 → 간사이국제공항 11:10\n예약번호: ABC123\n\n' +
     '[숙소] 난바 스테이 호텔\n체크인 2026-12-05 15:00\n체크아웃 2026-12-08 11:00\n예약번호 NMB-7788';
 
@@ -55,10 +64,11 @@
     var f2 = document.getElementById('f2'), f3 = document.getElementById('f3');
     // 시드 데이터를 읽도록 두 프레임을 새로 연다
     var stamp = Date.now();
-    f2.src = '../index.html?shot=2&t=' + stamp;
-    f3.src = '../index.html?shot=3&t=' + stamp;
-    await Promise.all([waitReady(f2), waitReady(f3)]);
-    await sleep(300);
+    await loadFrame(f2, '../index.html?shot=2&t=' + stamp);
+    await loadFrame(f3, '../index.html?shot=3&t=' + stamp);
+    await waitReady(f2);
+    await waitReady(f3);
+    await sleep(200);
     var w2 = f2.contentWindow, w3 = f3.contentWindow;
     w2.TL.App.openTrip(t.id, 'schedule');
     w2.TL.App.view.day = 'd2';
