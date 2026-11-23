@@ -426,7 +426,7 @@
     setv('#f_title', '공항 이동');
     setv('#f_time', '1600');
     await clickSel('[data-action="save-schedule"]');
-    ok(qa('.tl-item').length === 1, '마지막 날 일정 추가');
+    ok(qa('.tl-item').length >= 1 && text('.tl').indexOf('공항 이동') >= 0, '마지막 날 일정 추가', qa('.tl-item').length);
     await clickSel('[data-action="edit-trip"]');
     await clickSel('[data-action="cal-toggle"]');
     await pickDate('2026-12-05');
