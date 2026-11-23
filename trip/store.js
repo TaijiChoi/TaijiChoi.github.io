@@ -17,7 +17,7 @@
      기기에 저장된 내 설정이 없으면 이 값으로 바로 로그인·실시간 공유를 쓴다.
      apiKey는 Firebase 웹 앱에서 공개되는 값이고, 실제 접근은 Firestore 규칙이 막는다. */
   var DEFAULT_FIREBASE = {
-    apiKey: 'AIzaSyB2l8IQ6IFb_Dz-pLlfOXeNW6NDY_vJMj',
+    apiKey: 'AIzaSyB2l8IQ6IFb_Dz-pLlfOXeNW6NDY_vJMjM',
     authDomain: 'triplog-c4921.firebaseapp.com',
     projectId: 'triplog-c4921',
     storageBucket: 'triplog-c4921.firebasestorage.app',
