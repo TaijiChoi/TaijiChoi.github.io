@@ -740,8 +740,8 @@
       '  deleteDoc: function (ref) { delete __qaDb.docs[ref.path]; __qaFire(ref.path); return Promise.resolve(); },',
       '  getDoc: function (ref) { return Promise.resolve({ exists: function () { return !!__qaDb.docs[ref.path]; }, data: function () { return __qaDb.docs[ref.path]; } }); }',
       '};',
-      'TL.Store.testInjectRemote(__qaFs, {});',
       'TL.Store.clearAll();',
+      'TL.Store.testInjectRemote(__qaFs, {});',
       'TL.Auth.testSignIn({ uid: "qa1", displayName: "테스트 재원", email: "qa@example.com" });',
       'globalThis.__rTrip = TL.Store.createTrip({ name: "되살아나기 QA", startDate: "2026-12-10", endDate: "2026-12-12" });',
       'TL.Store.connect(__rTrip.id, { create: true });'
@@ -829,21 +829,33 @@
     await sleep(80);
 
     w.TL.Store.setFirebase({ apiKey: 'qa-key', projectId: 'qa-project', appId: 'qa-app' });
+    // 로그인 상태 시트
+    await clickSel('[data-action="open-account"]');
+    await sleep(150);
+    ok(text('.sheet-body').indexOf('계정에 저장된 여행') >= 0, '계정 시트: 저장 현황');
+    ok(!!q('[data-action="auth-sync"]') && !!q('[data-action="auth-signout"]'), '계정 시트: 동기화·로그아웃');
+    noOverflow('계정 시트(로그인)');
+    // 로그아웃 → 게스트 시트에서 이메일 로그인 화면 확인
+    await clickSel('[data-action="auth-signout"]');
+    await sleep(400);
+    ok(!w.TL.Auth.signedIn(), '계정 시트에서 로그아웃');
     await clickSel('[data-action="open-account"]');
     await sleep(150);
     ok(!!q('[data-action="auth-google"]'), '구글 로그인 버튼');
     ok(!!q('#auth_email') && !!q('#auth_pw'), '이메일 로그인 입력');
     ok(text('.sheet-body').indexOf('taijichoi.github.io') >= 0, '승인된 도메인 안내');
     noOverflow('계정 시트(이메일)');
-
-    // 이메일 로그인: 검증 문구
     await clickSel('[data-action="auth-email"]');
     ok(text('#auth-msg').indexOf('이메일 주소') >= 0, '빈 이메일 검증', text('#auth-msg'));
     setv('#auth_email', 'qa@example.com');
     setv('#auth_pw', '123');
     await clickSel('[data-action="auth-signup"]');
     ok(text('#auth-msg').indexOf('6자 이상') >= 0, '짧은 비밀번호 검증', text('#auth-msg'));
-    await clickSel('[data-action="close-modal"]');
+    setv('#auth_pw', 'secret1');
+    await clickSel('[data-action="auth-email"]');
+    await sleep(500);
+    ok(w.TL.Auth.signedIn(), '이메일 로그인 성공(가짜 인증)');
+    ok(!q('.modal'), '로그인 뒤 시트 닫힘');
 
     // 계정 여행 목록 등록 (가짜 계정 저장소)
     await w.eval('TL.Account.sync()');
