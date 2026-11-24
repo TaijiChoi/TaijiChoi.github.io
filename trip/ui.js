@@ -252,6 +252,23 @@
   };
   UI.refresh = function () { if (TL.App && TL.App.render) TL.App.render(); };
 
+  /* ------------------------------------------------------------ 권한(v20) */
+  /** 로그인했는지 확인하고, 안 했으면 안내 토스트와 함께 로그인 시트를 연다 */
+  UI.requireLogin = function (msg) {
+    var signed = false;
+    try { signed = !!(TL.Auth && TL.Auth.signedIn && TL.Auth.signedIn()); } catch (e) {}
+    if (signed) return true;
+    UI.toast(msg || '로그인하고 함께 써요 · 로그인하면 여행을 만들고 기록할 수 있어요', 3000);
+    if (TL.Dialogs && TL.Dialogs.account) TL.Dialogs.account();
+    return false;
+  };
+  /** Store가 남긴 거부 이유를 사용자 문장으로 보여준다 */
+  UI.denyToast = function (code) {
+    if (code === 'login') { UI.requireLogin(); return; }
+    if (code === 'owner') { UI.toast('방장만 일행을 추가·수정·삭제할 수 있어요', 2800); return; }
+    if (code === 'notmember') { UI.toast('이 여행의 일행이 아니에요 · 초대 링크로 다시 참여해 주세요', 3200); return; }
+  };
+
   /* ------------------------------------------------------------ account */
   /** 홈 상단의 계정 배지: 로그인 전에는 'Google 로그인' 버튼, 로그인 뒤에는 이름 칩 */
   UI.accountBadgeHtml = function () {
@@ -267,8 +284,11 @@
 
   /* --------------------------------------------------------------- home */
   UI.renderHome = function () {
-    var trips = Store.trips();
     var signed = !!(TL.Auth && TL.Auth.signedIn());
+    var user = signed ? TL.Auth.currentUser() : null;
+    var trips = Store.visibleTrips(user);          // 방장이거나 일행으로 등록된 여행만
+    var mine = trips.filter(function (t) { return !t.sample; });
+    var samples = trips.filter(function (t) { return t.sample; });
     var html = '';
     html += '<header class="topbar plain">' +
       '<div class="brand"><span class="brand-mark">' + UI.icon('plane', 16) + '</span>트립로그</div>' +
@@ -281,35 +301,57 @@
       '<p>일정 · 가계부 · 준비물을 한 곳에. 일행과 실시간으로 함께 써요.</p>' +
       '</section>';
 
-    if (!trips.length) {
+    if (!signed) {
+      html += '<div class="card flat login-note">' +
+        '<div class="ln-head">' + UI.icon('lock', 17) + '<b>로그인하면 내 여행이 보여요</b></div>' +
+        '<p>내가 만든 여행과 일행으로 등록된 여행만 목록에 나와요. 여행 만들기·참여·일정·지출 등록도 로그인 후에 할 수 있어요.</p>' +
+        '<button class="btn btn-primary sm" data-action="open-account">' + UI.icon('google', 16) + 'Google로 로그인</button>' +
+        '<div class="hintline" style="margin-top:6px">로그인하지 않으면 아래 <b>예시 여행</b>으로 화면만 둘러볼 수 있어요.</div>' +
+      '</div>';
+    }
+
+    if (!mine.length) {
       html += '<div class="empty">' +
         '<div class="emo">🧳</div>' +
-        '<h3>아직 여행이 없어요</h3>' +
-        '<p>새 여행을 만들거나, 예시 여행으로 먼저 둘러보세요.</p>' +
+        '<h3>' + (signed ? '아직 여행이 없어요' : '내 여행은 로그인 후에 보여요') + '</h3>' +
+        '<p>' + (signed ? '새 여행을 만들거나, 일행에게 받은 초대 코드로 참여해 보세요.' : '로그인하면 내 여행 목록이 여기에 나와요.') + '</p>' +
         '<div class="btn-row"><button class="btn btn-primary" data-action="new-trip">' + UI.icon('plus') + '새 여행 만들기</button></div>' +
-        '<div class="btn-row"><button class="btn btn-ghost" data-action="load-sample">' + UI.icon('sparkle') + '예시 여행 보기</button></div>' +
+        '<div class="btn-row"><button class="btn btn-ghost" data-action="join-trip">' + UI.icon('link') + '초대 코드로 참여하기</button></div>' +
+        (samples.length ? '' : '<div class="btn-row"><button class="btn btn-ghost" data-action="load-sample">' + UI.icon('sparkle') + '예시 여행 보기</button></div>') +
         '</div>';
-    } else {
-      html += '<div class="trip-list">' + trips.map(UI.tripCardHtml).join('') + '</div>';
+    }
+
+    if (mine.length) {
+      html += '<div class="trip-list">' + mine.map(function (t) { return UI.tripCardHtml(t, user); }).join('') + '</div>';
       html += '<div class="home-actions">' +
         '<button class="btn btn-primary" data-action="new-trip">' + UI.icon('plus') + '새 여행 만들기</button>' +
         '<button class="btn btn-ghost" data-action="join-trip">' + UI.icon('link') + '초대 코드로 참여하기</button>' +
         '</div>';
     }
+
+    if (samples.length) {
+      html += '<div class="section-title" style="margin-top:22px"><h2>체험용 예시 여행</h2>' +
+        '<span class="pill gray">로그인 없이 둘러보기</span></div>' +
+        '<div class="trip-list">' + samples.map(function (t) { return UI.tripCardHtml(t, user); }).join('') + '</div>' +
+        '<div class="hintline">예시 여행은 내 계정·목록에 저장되지 않아요. 기록을 남기려면 로그인해 주세요.</div>';
+    }
+
     html += '<div class="tiny muted center" style="margin:26px 0 8px;line-height:1.6">' +
       (signed
         ? '로그인한 계정에 여행 목록을 저장했어요.<br>다른 기기에서 같은 계정으로 로그인하면 그대로 열려요.'
-        : '데이터는 이 기기 브라우저에 저장돼요.<br>로그인하면 다른 기기에서도 열리고, 일행과 함께 쓰려면 실시간 공유를 켜세요.') + '</div>';
+        : '데이터는 로그인한 계정에 저장돼요.<br>일행과 함께 쓰려면 초대 링크를 받아 참여하세요.') + '</div>';
     html += '</div>';
     return html;
   };
 
-  UI.tripCardHtml = function (trip) {
+  UI.tripCardHtml = function (trip, user) {
     var t = Core.totals(trip, trip.data);
     var dday = Core.dday(trip);
     var dcls = /D-\d|D-DAY/.test(dday) ? '' : (dday === '여행 중' ? 'mint' : 'gray');
     var people = (trip.members || []).length;
     var sub = [trip.destination, Core.rangeLabel(trip.startDate, trip.endDate)].filter(Boolean).join(' · ');
+    var me = user === undefined ? null : user;
+    var isOwner = !!(me && me.uid && String(trip.ownerUid || '') === String(me.uid));
     return '<button class="trip-card" data-action="open-trip" data-id="' + UI.esc(trip.id) + '">' +
       '<span class="trip-thumb" style="background:' + UI.thumbBg(trip.destination || trip.name) + '">' +
         (trip.remoteCode ? UI.icon('users', 24) : UI.icon('plane', 24)) +
@@ -318,7 +360,7 @@
         '<span class="row between" style="gap:6px">' +
           '<span class="trip-title">' + UI.esc(trip.name) + '</span>' +
           '<span class="row gap6" style="flex:none">' +
-            (trip.sample ? '<span class="pill gray">예시</span>' : '') +
+            (trip.sample ? '<span class="pill gray">예시</span>' : (isOwner && trip.remoteCode ? '<span class="pill mint">방장</span>' : '')) +
             '<span class="dday ' + dcls + '">' + UI.esc(dday) + '</span>' +
           '</span>' +
         '</span>' +

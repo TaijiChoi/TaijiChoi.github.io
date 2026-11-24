@@ -732,3 +732,28 @@ body.dragging{user-select:none;-webkit-user-select:none}
 .merge-list .grow{display:flex;flex-direction:column;gap:1px;min-width:0}
 .merge-list .grow b{font-size:13.5px}
 .merge-list small{font-size:11.5px;color:var(--sub)}
+
+/* ============================================================ v20
+   일정 시간 시·분 고르기 · 방장 전용 안내 · 로그인 안내 */
+.time-pick{border:1px solid var(--line);border-radius:14px;padding:10px 11px;background:#FBFCFE}
+.tp-sum{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.tp-val{font-weight:800;font-size:14px;color:var(--blue-d);letter-spacing:-.2px}
+.tp-group{display:flex;align-items:flex-start;gap:7px;margin-top:6px}
+.tp-label{flex:none;width:14px;padding-top:7px;font-size:11px;font-weight:700;color:var(--sub-2)}
+.tp-chips{display:flex;flex-wrap:wrap;gap:4px;flex:1;min-width:0}
+.tp-chip{height:30px;min-width:30px;padding:0 5px;border-radius:8px;border:1px solid var(--line);background:#fff;
+  font-size:12.5px;font-weight:650;color:var(--ink-2);font-variant-numeric:tabular-nums;line-height:1}
+.tp-chip:active{background:#EEF4FF}
+.tp-chip.active{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 2px 6px rgba(54,143,255,.28)}
+.tp-input{margin-top:9px;height:40px;text-align:center;letter-spacing:2px;font-weight:700}
+.lock-note{display:flex;align-items:flex-start;gap:8px;margin-top:12px;padding:11px 12px;border-radius:13px;
+  background:#FFF7ED;border:1px solid #FDE2C3;color:#8A4B0C;font-size:12.5px;line-height:1.5}
+.lock-note svg{flex:none;margin-top:1px}
+.lock-note b{color:#7A3F05}
+.login-note{margin-bottom:14px;padding:14px}
+.login-note .ln-head{display:flex;align-items:center;gap:7px;font-size:14px;color:var(--ink);margin-bottom:5px}
+.login-note .ln-head svg{color:var(--blue-d)}
+.login-note p{font-size:12.5px;color:var(--sub);line-height:1.55;margin-bottom:10px}
+.login-note .btn.sm{width:100%}
+.linked-tag{display:inline-flex;align-items:center;height:16px;padding:0 5px;border-radius:5px;background:#EEF2F9;
+  color:#5A6B85;font-size:10px;font-weight:750;letter-spacing:-.2px;vertical-align:1px}

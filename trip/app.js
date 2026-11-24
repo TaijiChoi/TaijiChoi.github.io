@@ -65,6 +65,14 @@
   App.openTrip = function (id, tab) {
     var trip = Store.trip(id);
     if (!trip) return;
+    // 본인이 방장이거나 일행으로 등록된 여행만 연다 (일행에서 빠졌으면 입장하지 않는다)
+    var user = (TL.Auth && TL.Auth.signedIn && TL.Auth.signedIn()) ? TL.Auth.currentUser() : null;
+    if (!TL.Core.canViewTrip(trip, user)) {
+      App.view.screen = 'home'; App.view.tripId = null;
+      setHash(); render();
+      UI.toast(trip.sample ? '로그인하면 예시 여행을 체험할 수 있어요' : '이 여행의 일행이 아니에요 · 초대 링크로 다시 참여해 주세요', 3200);
+      return;
+    }
     App.view.screen = 'trip';
     App.view.tripId = id;
     App.view.tab = tab || 'schedule';
@@ -123,6 +131,15 @@
     if (!screenEl) return;
     var trip = v.tripId ? Store.trip(v.tripId) : null;
     if (v.screen === 'trip' && !trip) { v.screen = 'home'; v.tripId = null; }
+    if (v.screen === 'trip' && trip) {
+      var viewer = (TL.Auth && TL.Auth.signedIn && TL.Auth.signedIn()) ? TL.Auth.currentUser() : null;
+      if (!Core.canViewTrip(trip, viewer)) {
+        // 방장이 일행에서 뺐거나 로그아웃된 경우 — 목록으로 되돌린다
+        v.screen = 'home'; v.tripId = null;
+        trip = null;
+        UI.toast('이 여행은 볼 수 없어요 · 일행에서 빠졌을 수 있어요', 3200);
+      }
+    }
     if (v.screen === 'trip' && trip) {
       // 기간이 바뀌어 없어진 Day를 가리키고 있으면 초기화한다
       var dayKeys = Core.dayList(trip).map(function (d) { return d.key; });
@@ -207,12 +224,12 @@
     /* 여행/일정/지출/체크/설정 */
     var trip = App.currentTrip();
     switch (act) {
-      case 'new-trip': TL.Dialogs.newTrip(); return;
-      case 'edit-trip': if (trip) TL.Dialogs.editTrip(trip); return;
+      case 'new-trip': if (!UI.requireLogin('로그인하면 여행을 만들 수 있어요')) return; TL.Dialogs.newTrip(); return;
+      case 'edit-trip': if (!UI.requireLogin('로그인하면 여행 정보를 고칠 수 있어요')) return; if (trip) TL.Dialogs.editTrip(trip); return;
       case 'manage-members': if (trip) TL.Dialogs.members(trip); return;
       case 'who-am-i': if (trip) TL.Dialogs.whoAmI(trip); return;
       case 'open-share': if (trip) TL.Dialogs.share(trip); return;
-      case 'join-trip': TL.Dialogs.join(); return;
+      case 'join-trip': if (!UI.requireLogin('로그인하면 초대 코드로 참여할 수 있어요')) return; TL.Dialogs.join(); return;
       case 'open-settings': TL.Dialogs.settings(trip); return;
       case 'load-sample':
         Store.loadSample();
@@ -220,13 +237,18 @@
         App.goHome();
         UI.toast('예시 여행을 불러왔어요');
         return;
-      case 'add-schedule': TL.Dialogs.schedule(trip, null, el.getAttribute('data-day')); return;
-      case 'edit-schedule': TL.Dialogs.schedule(trip, el.getAttribute('data-id')); return;
+      case 'add-schedule':
+        if (!UI.requireLogin('로그인하면 일정을 추가할 수 있어요')) return;
+        TL.Dialogs.schedule(trip, null, el.getAttribute('data-day')); return;
+      case 'edit-schedule':
+        if (!UI.requireLogin('로그인하면 일정을 고칠 수 있어요')) return;
+        TL.Dialogs.schedule(trip, el.getAttribute('data-id')); return;
       case 'move-schedule':
+        if (!UI.requireLogin('로그인하면 일정을 옮길 수 있어요')) return;
         Store.moveSchedule(trip.id, el.getAttribute('data-id'), Number(el.getAttribute('data-dir')));
-        return;
-      case 'add-expense': TL.Dialogs.expense(trip, null); return;
-      case 'edit-expense': TL.Dialogs.expense(trip, el.getAttribute('data-id')); return;
+        break;
+      case 'add-expense': if (!UI.requireLogin('로그인하면 지출을 기록할 수 있어요')) return; TL.Dialogs.expense(trip, null); return;
+      case 'edit-expense': if (!UI.requireLogin('로그인하면 지출을 고칠 수 있어요')) return; TL.Dialogs.expense(trip, el.getAttribute('data-id')); return;
     }
 
     var fn = A[act];
@@ -236,6 +258,9 @@
         UI.toast('문제가 생겼어요: ' + (e.message || e));
       }
     }
+    // Store가 권한 때문에 거부했으면 그 이유를 알려 준다 (로그인 유도 포함)
+    var deny = Store.takeError();
+    if (deny) UI.denyToast(deny);
   });
 
   /* 입력 중 미리보기 */
@@ -248,6 +273,8 @@
       if (TL.Dialogs.resetRateManual) TL.Dialogs.resetRateManual();
       TL.Dialogs.updateExpensePreview();
       if (cur !== 'KRW' && TL.Dialogs.autoRate) TL.Dialogs.autoRate(cur);
+    } else if (id === 'f_time') {
+      if (TL.Dialogs.syncTimePick) TL.Dialogs.syncTimePick();
     } else if (id === 'f_amount' || id === 'f_rate' || id === 'f_charged') {
       if (id === 'f_rate' && TL.Dialogs.markRateManual) TL.Dialogs.markRateManual();
       TL.Dialogs.updateExpensePreview();
@@ -382,16 +409,50 @@
   }
 
   /* --------------------------------------------------------------- boot */
+  var pendingCode = '';   // 로그인 전에 열린 초대 링크 — 로그인하면 이어서 참여한다
+
+  function tryJoin(code, opts) {
+    if (!Store.firebaseConfig()) {
+      render();
+      TL.Dialogs.join();
+      var e1 = document.getElementById('f_code');
+      if (e1) e1.value = code;
+      UI.toast('Firebase 설정을 먼저 입력해 주세요', 3000);
+      return;
+    }
+    UI.toast('초대받은 여행을 불러오는 중…');
+    Store.joinByCode(code, Store.settings().nickname).then(function (t) {
+      pendingCode = '';
+      App.openTrip(t.id, 'schedule');
+      cleanUrl();
+      TL.Dialogs.maybeWhoAmI(Store.trip(t.id));
+    }).catch(function (e) {
+      var needLogin = e && e.code === 'need-login';
+      UI.toast(needLogin ? '로그인한 뒤 초대 링크를 다시 열어 주세요' : '참여 실패: ' + (e.message || e), 4000);
+      TL.Dialogs.join();
+      var el = document.getElementById('f_code');
+      if (el) el.value = code;
+    });
+  }
+
   function boot() {
     booted = true;
     App.view.mapSource = readMapSource();
     Store.setOnline(navigator.onLine !== false);
-    // 계정 로그인: Firebase 설정이 있을 때만 조용히 시작한다 (게스트 상태는 그대로)
+    // 계정 로그인: Firebase 설정이 있을 때만 조용히 시작한다
     try {
       if (TL.Auth) TL.Auth.init();
       if (TL.Account) {
         TL.Account.init();
         TL.Account.onChange(function () { render(); });
+      }
+      if (TL.Auth && TL.Auth.onChange) {
+        TL.Auth.onChange(function (user) {
+          if (!user || !user.uid) return;
+          // 로그인 직후: 소유자 없는 내 여행을 이 계정 것으로 정리하고, 대기 중인 초대 링크를 이어서 처리
+          try { Store.claimTrips(user.uid); } catch (e) {}
+          if (pendingCode) { var c = pendingCode; pendingCode = ''; tryJoin(c); }
+        });
       }
     } catch (e) { console.warn('[triplog] auth', e); }
     var code = Store.bootRemoteFromURL(location.search);
@@ -403,26 +464,15 @@
     });
 
     if (code) {
-      // 초대 링크로 들어온 경우
-      if (Store.firebaseConfig()) {
-        UI.toast('초대받은 여행을 불러오는 중…');
-        Store.joinByCode(code, Store.settings().nickname).then(function (t) {
-          App.openTrip(t.id, 'schedule');
-          cleanUrl();
-          TL.Dialogs.maybeWhoAmI(Store.trip(t.id));
-        }).catch(function (e) {
-          UI.toast('참여 실패: ' + (e.message || e), 4000);
-          TL.Dialogs.join();
-          var el = document.getElementById('f_code');
-          if (el) el.value = code;
-        });
-      } else {
+      // 초대 링크로 들어온 경우 — 참여는 로그인한 사용자만
+      if (!Store.signedIn()) {
+        pendingCode = code;
         render();
-        TL.Dialogs.join();
-        var el2 = document.getElementById('f_code');
-        if (el2) el2.value = code;
-        UI.toast('Firebase 설정을 먼저 입력해 주세요', 3000);
-        return;
+        UI.requireLogin('초대받은 여행에 참여하려면 로그인해 주세요');
+        var ce = document.getElementById('f_code');
+        if (ce) ce.value = code;
+      } else {
+        tryJoin(code);
       }
     } else if (Store.firstRun()) {
       Store.loadSample();

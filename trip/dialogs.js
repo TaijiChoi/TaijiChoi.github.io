@@ -68,6 +68,7 @@
   };
 
   A['save-new-trip'] = function () {
+    if (!UI.requireLogin('로그인하면 여행을 만들 수 있어요')) return;
     var name = UI.val('f_name').trim();
     if (!name) { UI.toast('여행 이름을 입력해 주세요'); return; }
     var chk = Core.checkRange(cal.start, cal.end || cal.start);
@@ -81,6 +82,7 @@
       baseCurrency: UI.val('f_cur') || 'KRW',
       members: members
     });
+    if (!trip) { UI.toast('여행을 만들지 못했어요 · 로그인을 확인해 주세요', 3000); return; }
     Store.setMeMember(trip.id, members.some(function (m) { return m.id === dlg.meId; }) ? dlg.meId : members[0].id);
     if (!Store.settings().nickname) Store.setNickname(members[0].name);
     UI.close();
@@ -108,6 +110,7 @@
   };
 
   A['save-edit-trip'] = function () {
+    if (!UI.requireLogin('로그인하면 여행 정보를 고칠 수 있어요')) return;
     var trip = tripOf() || TL.App.currentTrip();
     if (!trip) { UI.toast('여행 정보를 찾을 수 없어요'); return; }
     var name = UI.val('f_name').trim() || trip.name;
@@ -200,10 +203,12 @@
   /* ========================================================== 일행 관리 */
   function memRows(trip) {
     var me = Store.meId(trip, null);
+    var canManage = Core.canManageMembers(trip, TL.Auth && TL.Auth.currentUser ? TL.Auth.currentUser() : null);
     return (trip.members || []).map(function (m) {
       var st = Store.memberStats(trip, m.id);
       var sub = (st.paidCount ? '결제 ' + st.paidCount + '건 · ' + Core.won(st.paidSum) : '결제 없음') +
         (st.checkCount ? ' · 준비물 ' + st.checkCount + '개' : '');
+      if (m.email) sub = m.email + ' · ' + sub;
       if (mem.editing === m.id) {
         return '<div class="mrow editing" data-id="' + UI.esc(m.id) + '">' + UI.avatar(m.name, 'lg') +
           '<input class="input" id="mem-edit-input" value="' + UI.esc(m.name) + '" maxlength="12" autocomplete="off">' +
@@ -214,10 +219,13 @@
       return '<div class="mrow" data-id="' + UI.esc(m.id) + '">' +
         '<button type="button" class="mem-main" data-action="mem-set-me" data-id="' + UI.esc(m.id) + '" aria-label="' + UI.esc(m.name) + ' 내 이름으로 지정">' +
           UI.avatar(m.name, 'lg') +
-          '<span class="tx"><b>' + UI.esc(m.name) + (m.id === me ? ' <span class="me-tag">나</span>' : '') + '</b><small>' + UI.esc(sub) + '</small></span>' +
+          '<span class="tx"><b>' + UI.esc(m.name) + (m.id === me ? ' <span class="me-tag">나</span>' : '') +
+            (m.uid && m.id !== me ? ' <span class="linked-tag">계정 연결</span>' : '') + '</b><small>' + UI.esc(sub) + '</small></span>' +
         '</button>' +
-        '<button class="icon-btn sm" data-action="mem-edit" data-id="' + UI.esc(m.id) + '" aria-label="' + UI.esc(m.name) + ' 이름 수정">' + UI.icon('edit', 16) + '</button>' +
-        '<button class="icon-btn sm danger" data-action="mem-del" data-id="' + UI.esc(m.id) + '" aria-label="' + UI.esc(m.name) + ' 삭제">' + UI.icon('trash', 16) + '</button>' +
+        (canManage
+          ? '<button class="icon-btn sm" data-action="mem-edit" data-id="' + UI.esc(m.id) + '" aria-label="' + UI.esc(m.name) + ' 이름 수정">' + UI.icon('edit', 16) + '</button>' +
+            '<button class="icon-btn sm danger" data-action="mem-del" data-id="' + UI.esc(m.id) + '" aria-label="' + UI.esc(m.name) + ' 삭제">' + UI.icon('trash', 16) + '</button>'
+          : '') +
       '</div>';
     }).join('');
   }
@@ -226,29 +234,46 @@
     if (el && mem.trip) el.innerHTML = memRows(mem.trip);
     UI.refresh();
   }
+  function isMemberOwner(trip) {
+    return Core.canManageMembers(trip, TL.Auth && TL.Auth.currentUser ? TL.Auth.currentUser() : null);
+  }
   D.members = function (trip) {
     if (!trip) return;
     mem = { trip: trip, editing: '' };
+    var canManage = isMemberOwner(trip);
     var html = '<div class="note">이름을 누르면 <b>내 이름</b>으로 지정돼요. 내가 결제자 기본값이 되고 정산에 ‘나’로 쓰여요.</div>' +
-      '<div class="mem-rows" id="mem-rows">' + memRows(trip) + '</div>' +
-      '<div class="inline-add" style="margin-top:12px"><input class="input" id="mem-new" placeholder="일행 이름 (예: 아내)" maxlength="12" autocomplete="off" enterkeyhint="done">' +
-      '<button type="button" class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="mem-add">' + UI.icon('plus', 16) + '추가</button></div>' +
-      '<div class="hintline">실시간 공유 중이면 이름 변경과 추가가 일행 모두에게 보여요.</div>' +
-      '<div class="sheet-foot"><button class="btn btn-primary" data-action="close-modal">완료</button></div>';
+      '<div class="mem-rows" id="mem-rows">' + memRows(trip) + '</div>';
+    if (canManage) {
+      html += '<div class="inline-add" style="margin-top:12px"><input class="input" id="mem-new" placeholder="일행 이름 (예: 아내)" maxlength="12" autocomplete="off" enterkeyhint="done">' +
+        '<button type="button" class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="mem-add">' + UI.icon('plus', 16) + '추가</button></div>' +
+        '<div class="inline-add" style="margin-top:8px"><input class="input" id="mem-email" type="email" inputmode="email" placeholder="이메일 (선택) · 그 사람 계정과 연결" autocomplete="off"></div>' +
+        '<div class="hintline">이메일을 넣으면 그 사람이 이 계정으로 로그인했을 때 자동으로 이 일행으로 연결돼요.</div>' +
+        '<div class="hintline">실시간 공유 중이면 이름 변경과 추가가 일행 모두에게 보여요.</div>';
+    } else {
+      html += '<div class="lock-note">' + UI.icon('lock', 16) + '<span><b>방장만 일행을 추가·수정·삭제할 수 있어요.</b><br>' +
+        '내 이름은 위 목록에서 눌러 지정할 수 있어요.</span></div>';
+    }
+    html += '<div class="sheet-foot"><button class="btn btn-primary" data-action="close-modal">완료</button></div>';
     open(html, '일행 관리');
   };
   A['mem-add'] = function () {
     var trip = mem.trip;
     var el = document.getElementById('mem-new');
+    var mailEl = document.getElementById('mem-email');
     var v = el ? el.value.trim() : '';
+    var email = mailEl ? mailEl.value.trim() : '';
     if (!trip) return;
+    if (!UI.requireLogin('로그인하면 일행을 추가할 수 있어요')) return;
+    if (!isMemberOwner(trip)) { UI.toast('방장만 일행을 추가·수정·삭제할 수 있어요', 2800); return; }
     if (!v) { if (el) el.focus(); UI.toast('일행 이름을 입력해 주세요'); return; }
     if (v.length > 12) { UI.toast('이름은 12자까지 쓸 수 있어요'); return; }
-    var m = Store.addMember(trip.id, v);
-    if (!m) { UI.toast('이미 있는 이름이에요'); return; }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { if (mailEl) mailEl.focus(); UI.toast('이메일 주소를 확인해 주세요'); return; }
+    var m = Store.addMember(trip.id, v, email);
+    if (!m) { UI.toast('일행을 추가하지 못했어요 · 이름을 확인해 주세요'); return; }
     if (el) { el.value = ''; el.focus(); }
+    if (mailEl) mailEl.value = '';
     refreshMemRows();
-    UI.toast(m.name + ' 추가했어요');
+    UI.toast(m.name + (m.email ? ' · ' + m.email + ' 연결' : '') + ' 추가했어요', 2600);
   };
   A['mem-set-me'] = function (el) {
     var trip = mem.trip;
@@ -326,6 +351,7 @@
     var id = el.getAttribute('data-id');
     if (!trip) return;
     Store.setMeMember(trip.id, id);
+    Store.linkMe(trip.id, id);   // 이 일행에 내 계정(uid·이메일)을 연결해 본인 확인이 되게 한다
     var m = Store.myMember(trip);
     if (m) {
       if (!Store.settings().nickname) Store.setNickname(m.name);
@@ -338,17 +364,102 @@
     var el = document.getElementById('who-new');
     var v = el ? el.value.trim() : '';
     if (!trip) return;
+    if (!UI.requireLogin('로그인해야 여행에 참여할 수 있어요')) return;
     if (!v) { if (el) el.focus(); UI.toast('이름을 입력해 주세요'); return; }
-    var m = Store.addMember(trip.id, v);
+    var m = Store.joinAsMember(trip.id, { name: v });
     if (!m) { UI.toast('이름을 다시 확인해 주세요'); return; }
     Store.setMeMember(trip.id, m.id);
     Store.setNickname(m.name);
     UI.close();
     UI.toast(v + ' 님으로 합류했어요');
   };
+  /** 초대 링크로 들어온 로그인 사용자: 이메일·이름으로 나를 찾거나 새로 합류시킨다 */
+  D.joinSelf = function (trip, name) {
+    if (!trip || !Store.signedIn()) return null;
+    var acct = TL.Auth.currentUser();
+    var found = null;
+    (trip.members || []).forEach(function (m) { if (!found && Core.memberMatches(m, acct)) found = m; });
+    if (!found) {
+      var nick = String(name || '').trim() || Store.settings().nickname || Core.accountLabel(acct);
+      (trip.members || []).forEach(function (m) { if (!found && m.name === nick) found = m; });
+    }
+    var m = found || Store.joinAsMember(trip.id, { name: name || '' });
+    if (m) {
+      Store.setMeMember(trip.id, m.id);
+      Store.linkMe(trip.id, m.id);
+    }
+    return m;
+  };
 
   /* ============================================================== 일정 */
   function P() { return TL.Places || {}; }
+
+  /* ---- 시·분 고르기 (터치 한두 번) ---- */
+  var MIN_CHIPS = [0, 10, 15, 20, 30, 40, 45, 50];
+  function minuteText(m) { return (m < 10 ? '0' : '') + m; }
+  D.timePickHtml = function (value) {
+    var p = Core.timeParts(value);
+    var hasHour = p.hour != null;
+    var summary = hasHour ? Core.hourLabel(p.hour) + ' ' + p.minute + '분' : '시간 미정';
+    var html = '<div class="time-pick" id="time-pick">';
+    html += '<div class="tp-sum"><span class="tp-val" id="tp-val">' + UI.esc(summary) + '</span>' +
+      '<button type="button" class="btn xs btn-ghost" data-action="time-clear">미정</button></div>';
+    html += '<div class="tp-group"><span class="tp-label">시</span><div class="tp-chips tp-hours">';
+    for (var h = 0; h < 24; h++) {
+      html += '<button type="button" class="tp-chip' + (hasHour && p.hour === h ? ' active' : '') + '" ' +
+        'data-action="time-hour" data-h="' + h + '" aria-label="' + Core.hourLabel(h) + '시" ' +
+        'title="' + Core.hourLabel(h) + '">' + (h < 10 ? '0' : '') + h + '</button>';
+    }
+    html += '</div></div>';
+    html += '<div class="tp-group"><span class="tp-label">분</span><div class="tp-chips tp-mins">';
+    MIN_CHIPS.forEach(function (m) {
+      html += '<button type="button" class="tp-chip' + (hasHour && p.minute === m ? ' active' : '') + '" ' +
+        'data-action="time-min" data-m="' + m + '" aria-label="' + m + '분">' + minuteText(m) + '</button>';
+    });
+    html += '</div></div>';
+    html += '<input class="input tp-input" type="text" inputmode="numeric" id="f_time" maxlength="5" ' +
+      'placeholder="직접 입력 예: 09:30" value="' + UI.esc(value || '') + '">';
+    html += '<div class="hintline">시·분을 누르면 바로 채워져요. 직접 입력도 돼요(비우면 시간 미정).</div>';
+    html += '</div>';
+    return html;
+  };
+  /** 칩·요약 문구를 현재 f_time 값에 맞춰 갱신 (입력 중에는 HTML을 갈아끼우지 않는다) */
+  D.syncTimePick = function () {
+    var val = UI.val('f_time');
+    var p = Core.timeParts(val);
+    var sum = document.getElementById('tp-val');
+    if (sum) sum.textContent = p.hour != null ? Core.hourLabel(p.hour) + ' ' + p.minute + '분' : '시간 미정';
+    var hours = document.querySelectorAll('.tp-hours .tp-chip');
+    for (var i = 0; i < hours.length; i++) {
+      var h = Number(hours[i].getAttribute('data-h'));
+      if (p.hour != null && h === p.hour) hours[i].classList.add('active');
+      else hours[i].classList.remove('active');
+    }
+    var mins = document.querySelectorAll('.tp-mins .tp-chip');
+    for (var j = 0; j < mins.length; j++) {
+      var m = Number(mins[j].getAttribute('data-m'));
+      if (p.hour != null && m === p.minute) mins[j].classList.add('active');
+      else mins[j].classList.remove('active');
+    }
+  };
+  function setTimeValue(t) {
+    var el = document.getElementById('f_time');
+    if (el) el.value = t;
+    D.syncTimePick();
+  }
+  A['time-hour'] = function (el) {
+    var h = Number(el.getAttribute('data-h'));
+    var p = Core.timeParts(UI.val('f_time'));
+    var m = p.hour == null ? 0 : p.minute;
+    setTimeValue(Core.makeTime(h, m));
+  };
+  A['time-min'] = function (el) {
+    var m = Number(el.getAttribute('data-m'));
+    var p = Core.timeParts(UI.val('f_time'));
+    var h = p.hour == null ? 9 : p.hour;   // 분만 골랐으면 오전 9시부터
+    setTimeValue(Core.makeTime(h, m));
+  };
+  A['time-clear'] = function () { setTimeValue(''); };
 
   function pickedHtml(p) {
     if (!p) return '';
@@ -418,13 +529,12 @@
         return '<option value="' + d.key + '"' + (d.key === day ? ' selected' : '') + '>' + d.label +
           (d.date ? ' · ' + Core.isoLabel(d.date) : ' (출발 전)') + '</option>';
       }).join('') + '</select></div>';
-    html += '<div class="two"><div class="form-row"><label class="fl">시간 <span style="font-weight:500">(선택)</span></label>' +
-      '<input class="input" type="text" inputmode="numeric" id="f_time" placeholder="09:30" maxlength="5" value="' +
-      UI.esc(item && item.time || '') + '"><div class="hintline">예: 14:00 · 비우면 시간 미정</div></div>' +
-      '<div class="form-row"><label class="fl">카테고리</label><select class="input" id="f_cat">' +
+    html += '<div class="form-row"><label class="fl">시간 <span style="font-weight:500">(선택)</span></label>' +
+      D.timePickHtml(item && item.time || '') + '</div>';
+    html += '<div class="form-row"><label class="fl">카테고리</label><select class="input" id="f_cat">' +
       Core.SCHED_CATS.map(function (c) {
         return '<option value="' + c.key + '"' + (item && item.category === c.key ? ' selected' : '') + '>' + c.label + '</option>';
-      }).join('') + '</select></div></div>';
+      }).join('') + '</select></div>';
     html += '<div class="form-row"><label class="fl">일정 이름</label>' +
       '<input class="input" id="f_title" placeholder="예: 도톤보리 산책" maxlength="60" value="' + UI.esc(item ? item.title : '') + '"></div>';
     html += '<div class="form-row"><label class="fl">지도에 검색할 장소명 <span style="font-weight:500">(선택)</span></label>' +
@@ -514,6 +624,12 @@
     };
     TL.App.view.day = payload.dayKey;
     var saved = dlg.id ? Store.update(trip.id, 'schedules', dlg.id, payload) : Store.add(trip.id, 'schedules', payload);
+    if (!saved) {
+      var deny = Store.takeError();
+      UI.close();
+      UI.denyToast(deny || 'login');
+      return;
+    }
     var pairs = Core.overlapPairs(Core.sortedSchedules(trip.data, payload.dayKey))
       .filter(function (x) { return saved && (x.aId === saved.id || x.bId === saved.id); });
     UI.close();
@@ -829,6 +945,7 @@
   };
 
   A['save-expense'] = function () {
+    if (!UI.requireLogin('로그인하면 지출을 기록할 수 있어요')) return;
     var trip = tripOf() || TL.App.currentTrip();
     if (!trip) { UI.toast('여행 정보를 찾을 수 없어요'); return; }
     var amount = Core.num(UI.val('f_amount'), 0);
@@ -856,8 +973,13 @@
       private: !!dlg.private,
       memo: UI.val('f_memo').trim()
     };
-    if (dlg.id) Store.update(trip.id, 'expenses', dlg.id, payload);
-    else Store.add(trip.id, 'expenses', payload);
+    var out = dlg.id ? Store.update(trip.id, 'expenses', dlg.id, payload) : Store.add(trip.id, 'expenses', payload);
+    if (!out) {
+      var deny = Store.takeError();
+      UI.close();
+      UI.denyToast(deny || 'login');
+      return;
+    }
     UI.close();
     if (charged > 0) UI.toast((dlg.id ? '수정했어요' : '지출을 기록했어요') + ' · 실청구 ' + Core.won(charged) + ' 기준', 2800);
     else UI.toast(dlg.id ? '수정했어요' : '지출을 기록했어요');
@@ -865,6 +987,7 @@
 
   /* ============================================================ 체크리스트 */
   A['add-check'] = function () {
+    if (!UI.requireLogin('로그인하면 준비물을 추가할 수 있어요')) return;
     var trip = TL.App.currentTrip();
     if (!trip) return;
     var el = document.getElementById('chk-new');
@@ -921,6 +1044,7 @@
     if (trip) D.checkItem(trip, el.getAttribute('data-id'));
   };
   A['save-check'] = function () {
+    if (!UI.requireLogin('로그인하면 준비물을 고칠 수 있어요')) return;
     var trip = tripOf() || TL.App.currentTrip();
     if (!trip || !dlg.id) return;
     var text = UI.val('f_text').trim();
@@ -1007,14 +1131,16 @@
       html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">닫기</button>' +
         '<button class="btn btn-ghost" data-action="auth-signout">로그아웃</button></div>';
     } else {
-      html += '<div class="note">로그인하면 <b>내 여행 목록이 계정에 저장</b>돼 다른 기기에서도 그대로 열려요. ' +
-        '로그인하지 않아도 지금처럼 이 기기에 저장하고 초대 코드로 일행과 함께 쓸 수 있어요.</div>';
+      html += '<div class="note">로그인하면 <b>내 여행 목록이 계정에 저장</b>되고, 여행 만들기·참여·일정·지출·준비물 등록을 할 수 있어요. ' +
+        '내가 방장이거나 일행으로 등록된 여행만 목록에 보여요.</div>';
       if (!cfg) {
         html += '<div class="note mt12 warn-note">로그인을 쓰려면 먼저 <b>Firebase 연결</b>이 필요해요. 설정은 1분이면 끝나요.</div>' +
           '<div class="btn-row mt12"><button class="btn btn-primary" data-action="open-settings">Firebase 설정 열기</button></div>' +
           '<div class="hintline">Firebase를 연결하고 Authentication에서 Google·이메일 로그인을 켜면 바로 로그인할 수 있어요.</div>';
       } else {
         html += '<button class="btn provider google mt12" data-action="auth-google">' + UI.icon('google', 18) + 'Google로 계속하기</button>';
+        html += '<button class="btn btn-link sm" data-action="auth-google-redirect">현재 창에서 Google 로그인 (팝업이 안 열릴 때)</button>';
+        html += '<div class="hintline">팝업 창이 빈 화면으로 닫히거나 보안 프로그램이 막는 PC에서는 위 <b>현재 창에서 Google 로그인</b>을 누르세요. 화면이 잠시 이동했다가 돌아오면서 로그인돼요.</div>';
         html += '<div class="or-line"><span>또는 이메일</span></div>';
         html += '<div class="form-row"><label class="fl">이메일</label>' +
           '<input class="input" id="auth_email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com"></div>';
@@ -1059,6 +1185,17 @@
     TL.Auth.signInGoogle().then(function (res) {
       if (res && res.method === 'redirect') { UI.toast('로그인 화면으로 이동해요…', 2400); return; }
       afterSignIn();
+    }).catch(function (e) {
+      authMsg(TL.Auth.errorText(e), 'err');
+    });
+  };
+  /** 팝업이 막히는 PC를 위한 현재 창 로그인 (signInWithRedirect) */
+  A['auth-google-redirect'] = function () {
+    if (!Store.firebaseConfig()) { D.account(); UI.toast('먼저 Firebase를 연결해 주세요', 2600); return; }
+    if (!TL.Auth) return;
+    authMsg('로그인 화면으로 이동하는 중…');
+    TL.Auth.signInGoogleRedirect().then(function () {
+      UI.toast('Google 로그인 화면으로 이동해요…', 2600);
     }).catch(function (e) {
       authMsg(TL.Auth.errorText(e), 'err');
     });
@@ -1215,6 +1352,7 @@
   };
 
   A['do-join'] = function () {
+    if (!UI.requireLogin('로그인하면 초대 코드로 참여할 수 있어요')) return;
     var code = (UI.val('f_code') || '').trim().toUpperCase();
     var nick = (UI.val('f_nick') || '').trim();
     if (!code) { UI.toast('초대 코드를 입력해 주세요'); return; }
@@ -1226,10 +1364,13 @@
     UI.close();
     UI.toast('여행을 불러오는 중…');
     Store.joinByCode(code, nick).then(function (trip) {
+      var t = Store.trip(trip.id);
+      var m = D.joinSelf(t, nick);      // 내 계정(uid·이메일)을 일행에 연결 → 목록에 보이고 본인 판별이 된다
       TL.App.openTrip(trip.id, 'schedule');
-      if (!D.maybeWhoAmI(Store.trip(trip.id))) UI.toast('참여했어요');
+      UI.toast(m ? '참여했어요 · ' + m.name : '참여했어요');
     }).catch(function (e) {
-      UI.toast('참여 실패: ' + (e.message || e));
+      var needLogin = e && e.code === 'need-login';
+      UI.toast(needLogin ? '로그인한 뒤 다시 참여해 주세요' : '참여 실패: ' + (e.message || e));
     });
   };
 

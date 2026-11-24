@@ -192,6 +192,16 @@
           });
         });
       },
+      googleRedirect: function () {
+        // 팝업이 빈 화면으로 닫히는 PC를 위한 현재 창 로그인
+        return load().then(function () {
+          var p = new fbMod.GoogleAuthProvider();
+          try { p.setCustomParameters({ prompt: 'select_account' }); } catch (e) {}
+          return fbMod.signInWithRedirect(auth, p).then(function () {
+            return { method: 'redirect', user: null };
+          });
+        });
+      },
       emailSignIn: function (email, pw) {
         return load().then(function () {
           return fbMod.signInWithEmailAndPassword(auth, email, pw).then(function (res) {
@@ -265,6 +275,22 @@
       if (res && res.method === 'redirect') return { method: 'redirect', user: user };
       if (!user) return { method: 'popup', user: null };
       return { method: 'popup', user: user };
+    }).catch(function (e) {
+      busy = false;
+      lastError = Auth.errorText(e); lastCode = (e && e.code) || '';
+      emit();
+      throw e;
+    });
+  };
+  /** 팝업 없이 현재 창에서 Google 로그인 (PC 보안 프로그램·팝업 차단 대응) */
+  Auth.signInGoogleRedirect = function () {
+    busy = true; lastError = '';
+    return Promise.resolve().then(function () {
+      if (!api().googleRedirect) throw { code: 'auth/operation-not-supported-in-this-environment' };
+      return api().googleRedirect();
+    }).then(function (res) {
+      busy = false;
+      return { method: 'redirect', user: user, redirected: !!(res && res.method === 'redirect') };
     }).catch(function (e) {
       busy = false;
       lastError = Auth.errorText(e); lastCode = (e && e.code) || '';

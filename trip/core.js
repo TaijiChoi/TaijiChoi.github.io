@@ -122,6 +122,30 @@
     var n = Core.diffDays(start, end);
     return Math.max(0, n);
   };
+  /** 시간 문자열 → { hour: 0~23 | null, minute: 0~59 } (비었거나 못 읽으면 hour=null) */
+  Core.timeParts = function (v) {
+    var t = Core.normTime(v);
+    var m = /^(\d{2}):(\d{2})$/.exec(String(t || ''));
+    if (!m) return { hour: null, minute: 0 };
+    var h = Number(m[1]), mi = Number(m[2]);
+    if (!(h >= 0 && h <= 23) || !(mi >= 0 && mi <= 59)) return { hour: null, minute: 0 };
+    return { hour: h, minute: mi };
+  };
+  /** 시·분 → 'HH:MM'. 분을 못 읽으면 :00, 시가 없으면 '' */
+  Core.makeTime = function (hour, minute) {
+    var h = Number(hour);
+    if (hour === '' || hour == null || !isFinite(h) || h < 0 || h > 23) return '';
+    var mi = Number(minute);
+    if (minute === '' || minute == null || !isFinite(mi) || mi < 0 || mi > 59) mi = 0;
+    return (h < 10 ? '0' : '') + Math.round(h) + ':' + (mi < 10 ? '0' : '') + Math.round(mi);
+  };
+  /** 시간 칩에 보일 이름: 0~11시는 오전, 12~23시는 오후 */
+  Core.hourLabel = function (hour) {
+    var h = Number(hour);
+    if (!isFinite(h) || h < 0 || h > 23) return '';
+    if (h < 12) return '오전 ' + (h === 0 ? 12 : h);
+    return '오후 ' + (h === 12 ? 12 : h - 12);
+  };
   /** '930' → '09:30', '14:5' → '14:05', 빈 값은 '' */
   Core.normTime = function (v) {
     var s = String(v == null ? '' : v).trim();
@@ -986,6 +1010,52 @@
   Core.tripRole = function (trip, uid) {
     if (!trip || !uid) return 'member';
     return trip.ownerUid === uid ? 'owner' : 'member';
+  };
+  /** 계정 정보에서 uid·이메일을 꺼낸다 (문자열 uid도 받는다) */
+  function whoOf(user) {
+    if (!user) return { uid: '', email: '' };
+    if (typeof user === 'string') return { uid: user, email: '' };
+    return {
+      uid: String(user.uid || ''),
+      email: String(user.email || '').trim().toLowerCase()
+    };
+  }
+  Core.whoOf = whoOf;
+  /** 일행 한 명이 이 계정인가 (uid 우선, 없으면 이메일로 연결) */
+  Core.memberMatches = function (member, user) {
+    if (!member || !user) return false;
+    var me = whoOf(user);
+    if (me.uid && member.uid && String(member.uid) === me.uid) return true;
+    if (me.email && member.email && String(member.email).trim().toLowerCase() === me.email) return true;
+    return false;
+  };
+  /** 이 여행이 이 계정의 것인가: 방장이거나 일행에 등록(uid·이메일)된 경우만 true
+      · 예시 여행은 누구나 볼 수 있는 체험용이라 true
+      · 로그인하지 않은 게스트에게는 개인 여행을 보여주지 않는다 */
+  Core.canViewTrip = function (trip, user) {
+    if (!trip) return false;
+    if (trip.sample) return true;
+    var me = whoOf(user);
+    if (!me.uid && !me.email) return false;
+    if (me.uid && String(trip.ownerUid || '') === me.uid) return true;
+    var ms = trip.members || [];
+    for (var i = 0; i < ms.length; i++) {
+      if (Core.memberMatches(ms[i], me)) return true;
+    }
+    return false;
+  };
+  /** 일행 추가·수정·삭제는 방장(ownerUid)만 */
+  Core.canManageMembers = function (trip, user) {
+    if (!trip) return false;
+    var me = whoOf(user);
+    if (!me.uid) return false;
+    return String(trip.ownerUid || '') === me.uid;
+  };
+  /** 일행 한 명을 고칠 수 있는가: 방장은 모두, 그 외에는 자기 자신만 */
+  Core.canEditMember = function (trip, member, user) {
+    if (!trip || !member) return false;
+    if (Core.canManageMembers(trip, user)) return true;
+    return Core.memberMatches(member, user);
   };
   /** 기기 여행 목록과 계정 여행 목록을 맞출 계획
       pull: 계정에는 있는데 이 기기에 없는 초대코드(가져올 것)
