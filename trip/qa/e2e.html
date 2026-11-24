@@ -1192,14 +1192,17 @@
     w.eval('TL.Store.setFirebase({ apiKey: "qa-key", projectId: "qa-project", appId: "qa-app" })');
     w.eval([
       '(function () {',
-      '  var t = TL.Store.trip("' + trip.id + '");',
-      '  TL.Store.add(t.id, "schedules", { dayKey: "d2", title: "김포공항", category: "transport", lat: 37.5583, lng: 126.7963, order: 90 });',
-      '  TL.Store.add(t.id, "schedules", { dayKey: "d2", title: "광장시장", category: "food", lat: 37.5701, lng: 126.9996, order: 91 });',
-      '  TL.Store.add(t.id, "schedules", { dayKey: "d2", title: "경복궁", category: "sight", lat: 37.5796, lng: 126.977, order: 92 });',
+      '  var t = TL.Store.createTrip({ name: "v23 도로 경로", destination: "서울", startDate: "2026-12-10", endDate: "2026-12-12", members: [{ id: "a", name: "재원" }] });',
+      '  globalThis.__v23tripId = t.id;',
+      '  TL.Store.add(t.id, "schedules", { dayKey: "d1", title: "김포공항", category: "transport", lat: 37.5583, lng: 126.7963, order: 0 });',
+      '  TL.Store.add(t.id, "schedules", { dayKey: "d1", title: "광장시장", category: "food", lat: 37.5701, lng: 126.9996, order: 1 });',
+      '  TL.Store.add(t.id, "schedules", { dayKey: "d1", title: "경복궁", category: "sight", lat: 37.5796, lng: 126.977, order: 2 });',
       '  TL.Route.clear();',
+      '  TL.App.openTrip(t.id, "schedule");',
       '})();'
     ].join('\n'));
-    await click(q('.chip[data-day="d2"]'));
+    await sleep(300);
+    await click(q('.chip[data-day="d1"]'));
     var roadShown = false;
     for (var rq = 0; rq < 60; rq++) {
       if (q('.rt-badge.road')) { roadShown = true; break; }
