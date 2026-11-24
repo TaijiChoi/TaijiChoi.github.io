@@ -346,7 +346,7 @@
     await clickSel('[data-tab="schedule"]');
     await click(q('.chip[data-day="d1"]'));
     await click(q('.fab'));
-    ok(!!q('#pl_q') && qa('.pl-mode').length === 3, '장소 검색창·모드 탭', qa('.pl-mode').length);
+    ok(!!q('#pl_q') && qa('[data-action="pl-mode"]').length === 3, '장소 검색창·모드 탭', qa('[data-action="pl-mode"]').length);
     setv('#pl_q', '강남역');
     await clickSel('[data-action="pl-search"]');
     var plOk = await waitFor('.pl-row', 15000);
