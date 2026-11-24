@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>v23 진단2</title>
+<style>body{margin:0;background:#0F172A;color:#E5EDFB;font:12px/1.5 ui-monospace,monospace}
+iframe{width:390px;height:844px;border:0}#out{padding:10px;white-space:pre-wrap}</style></head>
+<body>
+<iframe id="f" src="../index.html?qa=1"></iframe>
+<pre id="out">…</pre>
+<script>
+(function () {
+  var f = document.getElementById('f'), out = document.getElementById('out'), lines = [];
+  function log(o) { lines.push(typeof o === 'string' ? o : JSON.stringify(o)); out.textContent = lines.join('\n'); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function w() { return f.contentWindow; }
+  function ready() { try { var x = w(); return !!(x && x.TL && x.TL.App && x.document.getElementById('screen')); } catch (e) { return false; } }
+  async function run() {
+    for (var i = 0; i < 100 && !ready(); i++) await sleep(100);
+    if (!ready()) return log('boot fail');
+    var win = w(), doc = win.document;
+    win.localStorage.clear();
+    win.eval('globalThis.__realConnect = TL.Store.connect;');
+    win.eval('TL.Store.connect = function (tripId) { var t = TL.Store.trip(tripId); if (t && !t.remoteCode) { t.remoteCode = "QA3001"; } return Promise.resolve({ code: "QA3001" }); };');
+    win.eval('TL.Auth.testSignIn({ uid: "qa1", displayName: "테스트", email: "qa@example.com" })');
+    win.eval('TL.Store.setFirebase({ apiKey: "qa-key", projectId: "qa-project", appId: "qa-app" })');
+    log('signed=' + win.eval('TL.Auth.signedIn()') + ' uid=' + win.eval('(TL.Auth.currentUser()||{}).uid'));
+    win.eval([
+      'globalThis.__qaDb = { docs: {}, subs: [] };',
+      'function __snap(p) { var v = __qaDb.docs[p]; return { exists: function () { return !!v; }, data: function () { return v; }, metadata: { fromCache: false } }; }',
+      'function __fire(p) { __qaDb.subs.slice().forEach(function (s) { if (s.kind === "doc" && s.path === p) s.cb(__snap(p)); else if (s.kind === "col" && (p === s.path || p.indexOf(s.path + "/") === 0)) { var pre = s.path + "/"; s.cb({ docs: [] }); } }); }',
+      'globalThis.__qaFs = {',
+      '  doc: function (db, a, b, c, d) { if (a === "triplog_meta") return { kind: "doc", path: "triplog_meta/" + b }; return { kind: "doc", path: d ? "trips/" + b + "/" + c + "/" + d : "trips/" + b }; },',
+      '  collection: function (db, a, b, c) { return { kind: "col", path: "trips/" + b + "/" + c }; },',
+      '  onSnapshot: function (ref, cb) { var s = { kind: ref.kind, path: ref.path, cb: cb }; __qaDb.subs.push(s); setTimeout(function () { __fire(ref.path); }, 0); return function () {}; },',
+      '  setDoc: function (ref, data, opt) { __qaDb.docs[ref.path] = (opt && opt.merge) ? Object.assign({}, __qaDb.docs[ref.path] || {}, data) : Object.assign({}, data); __fire(ref.path); return Promise.resolve(); },',
+      '  deleteDoc: function (ref) { delete __qaDb.docs[ref.path]; __fire(ref.path); return Promise.resolve(); },',
+      '  getDoc: function (ref) { return Promise.resolve(__snap(ref.path)); },',
+      '  updateDoc: function (ref, data) { if (!__qaDb.docs[ref.path]) return Promise.reject({ code: "not-found" }); __qaDb.docs[ref.path] = Object.assign({}, __qaDb.docs[ref.path], data); return Promise.resolve(); },',
+      '  getFirestore: function () { return {}; }',
+      '};',
+      'TL.Store.disconnect();',
+      'TL.Store.connect = __realConnect;',
+      'TL.Store.testInjectRemote(__qaFs, {});',
+      'TL.Store.clearAll();',
+      '__qaDb.docs["trips/HMHLXW"] = { name: "국내여행", destination: "강릉", startDate: "2026-11-28", endDate: "2026-11-30", createdAt: "2026-11-23T10:35:51.910Z", members: [{ id: "a", name: "Taiji" }, { id: "c", name: "Jaewon Taiji", uid: "qa1", email: "qa@example.com" }] };',
+      'TL.Store.state().trips.push({ id: "remote_HMHLXW", name: "국내여행", destination: "강릉", startDate: "2026-11-28", endDate: "2026-11-30", members: [{ id: "a", name: "Taiji" }, { id: "c", name: "Jaewon Taiji", uid: "qa1" }], rates: {}, remoteCode: "HMHLXW", data: { schedules: [], expenses: [], checklist: [], reservations: [] } });',
+      'TL.Store.notify();'
+    ].join('\n'));
+    await sleep(250);
+    log({ trip: win.eval('!!TL.Store.trip("remote_HMHLXW")'), code: win.eval('String(TL.Store.trip("remote_HMHLXW") && TL.Store.trip("remote_HMHLXW").remoteCode)'), canView: win.eval('TL.Core.canViewTrip(TL.Store.trip("remote_HMHLXW"), TL.Auth.currentUser())'), signed: win.eval('TL.Auth.signedIn()'), uid: win.eval('(TL.Auth.currentUser()||{}).uid') });
+    win.eval('TL.App.openTrip("remote_HMHLXW", "schedule")');
+    await sleep(500);
+    log({ screen: win.eval('TL.App.view.screen'), tripId: win.eval('String(TL.App.view.tripId)'), screenText: (doc.querySelector('#screen').textContent || '').replace(/\s+/g, ' ').slice(0, 70), toast: (doc.querySelector('#toast') || {}).textContent, code: win.eval('String(TL.Store.trip("remote_HMHLXW") && TL.Store.trip("remote_HMHLXW").remoteCode)'), docs: Object.keys(win.eval('__qaDb.docs')) });
+    win.eval("TL.Actions['delete-trip']()");
+    await sleep(300);
+    log({ modal: (doc.querySelector('.sheet-body') || {}).textContent ? (doc.querySelector('.sheet-body').textContent || '').replace(/\s+/g, ' ').slice(0, 120) : 'none', hasConfirm: !!doc.querySelector('[data-action="delete-trip-confirm"]') });
+    document.title = 'diag-done';
+  }
+  run().catch(function (e) { log('EX ' + (e && e.stack || e)); document.title = 'diag-done'; });
+})();
+</script></body></html>
