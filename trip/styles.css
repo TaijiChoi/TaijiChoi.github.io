@@ -753,6 +753,7 @@ body.dragging{user-select:none;-webkit-user-select:none}
 .danger-box{padding:2px 0 6px}
 .danger-head{display:flex;align-items:center;gap:8px;font-size:15.5px;color:var(--ink);letter-spacing:-.3px;margin-bottom:10px}
 .danger-head svg{flex:none;color:var(--danger)}
+.danger-name{margin:0 0 10px;font-size:14px;font-weight:800;color:var(--ink);letter-spacing:-.3px}
 .danger-lead{margin:0 0 10px;font-size:13.5px;line-height:1.6;font-weight:650;color:#B91C1C;
   background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:11px 12px}
 .danger-list{margin:0;padding-left:18px;font-size:12.5px;line-height:1.7;color:var(--sub)}
