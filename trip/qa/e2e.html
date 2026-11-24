@@ -610,7 +610,8 @@
     await sleep(200);
     w.TL.App.openTrip(idrTrip.id, 'money');
     await sleep(300);
-    ok(text('.rate-card').indexOf('외화 지출이 없어') >= 0, 'IDR 여행: 아직 외화 지출 없음');
+    ok(text('.rate-card').indexOf('외화 지출이 없어') >= 0, 'IDR 여행: 아직 외화 지출 없음',
+      'text=' + text('.rate-card').slice(0, 70) + ' | tab=' + w.TL.App.view.tab + ' | trip=' + (S.trip(idrTrip.id) ? 'y' : 'n'));
     await click(q('.fab'));
     ok(!!q('#f_currency option[value="IDR"]'), '지출 시트: IDR 통화 선택');
     setv('#f_amount', '1250000');
