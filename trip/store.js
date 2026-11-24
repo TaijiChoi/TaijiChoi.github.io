@@ -864,12 +864,15 @@
       return e.currency && e.currency !== 'KRW';
     });
   };
-  /** 이 여행이 쓰는 통화 코드(기본 통화·저장된 환율·외화 지출) */
+  /**
+   * 이 여행이 실제로 쓰는 통화 코드(기본 통화 + 외화 지출).
+   * trip.rates에는 기기 기본 환율이 모두 들어 있어서, 그것까지 '쓰는 통화'로 치면
+   * 가계부에 쓰지도 않는 15개 통화가 나열된다 — 실제로 쓴 통화만 고른다.
+   */
   Store.tripRateCodes = function (trip) {
     var set = {};
     if (!trip) return [];
     if (trip.baseCurrency && trip.baseCurrency !== 'KRW') set[trip.baseCurrency] = 1;
-    Object.keys(trip.rates || {}).forEach(function (k) { if (k !== 'KRW') set[k] = 1; });
     ((trip.data && trip.data.expenses) || []).forEach(function (e) {
       if (e.currency && e.currency !== 'KRW') set[e.currency] = 1;
     });
