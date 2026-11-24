@@ -487,7 +487,7 @@
 
     /* ============ 4e) v15: 서비스 워커 · 오프라인 배지 ============ */
     var reg = null;
-    for (var rgi = 0; rgi < 80; rgi++) {   // 부팅 때 Firebase 모듈 로드와 겹쳐도 등록될 때까지 (최대 20초)
+    for (var rgi = 0; rgi < 240; rgi++) {   // 부팅 때 Firebase 모듈·지도 로드와 겹쳐도 등록될 때까지 (최대 60초)
       try { reg = await w.navigator.serviceWorker.getRegistration(); } catch (e) {}
       if (reg) break;
       await sleep(250);
@@ -708,11 +708,15 @@
     w.TL.Auth.setProvider(null);
     w.TL.Account.testSetIO(null);
 
-    // v19: 기본 내장 설정(triplog-c4921)으로 실제 Firestore에 붙는지 읽기 1회로 확인
+    // v19: 기본 내장 설정(triplog-c4921)으로 실제 Firestore에 붙는지 읽기 1회로 확인 (첫 연결은 느릴 수 있어 재시도)
     var fbProbe = 'skip';
-    try {
-      fbProbe = await w.eval('TL.Store.testFirebase(TL.Store.firebaseConfig()).then(function(){return "ok";},function(e){return "fail:" + ((e && (e.code || e.message)) || e);})');
-    } catch (e) { fbProbe = 'ex:' + (e && e.message); }
+    for (var fbt = 0; fbt < 3; fbt++) {
+      try {
+        fbProbe = await w.eval('TL.Store.testFirebase(TL.Store.firebaseConfig()).then(function(){return "ok";},function(e){return "fail:" + ((e && (e.code || e.message)) || e);})');
+      } catch (e) { fbProbe = 'ex:' + (e && e.message); }
+      if (fbProbe === 'ok') break;
+      await sleep(2000);
+    }
     ok(fbProbe === 'ok', '기본 Firebase 프로젝트 실제 연결(triplog-c4921)', fbProbe);
     ok(S.isDefaultFirebase(), '연결 테스트 뒤에도 기본 설정 유지');
 
