@@ -866,8 +866,15 @@
     ok(w.eval("(__qaIOState.docs['users/qa1/trips/QA1234']||{}).role") === 'owner', '계정 문서에 역할(방장) 기록', w.eval("(__qaIOState.docs['users/qa1/trips/QA1234']||{}).role"));
 
     // 로그인 직후 병합 안내 (이 기기에만 있는 여행)
-    w.eval('var lt = TL.Store.createTrip({ name: "로컬 전용 QA", startDate: "2026-12-18", endDate: "2026-12-19" }); delete lt.remoteCode; delete lt.inviteCode; lt.createdHere = true; TL.Store.notify();');
+    w.eval([
+      'TL.Store.connect = function () { return Promise.resolve({}); };',   // 자동 공유(가짜 방)를 잠깐 멈춘다
+      'var lt = TL.Store.createTrip({ name: "로컬 전용 QA", startDate: "2026-12-18", endDate: "2026-12-19" });',
+      'delete lt.remoteCode; delete lt.inviteCode; lt.createdHere = true;',
+      'TL.Store.connect = __qaStubConnect;',
+      'TL.Store.notify();'
+    ].join('\n'));
     await sleep(150);
+    ok(S.visibleTrips().some(function (t) { return t.name === '로컬 전용 QA' && !t.remoteCode; }), '로컬 전용 여행 준비', S.visibleTrips().length);
     w.eval('TL.Dialogs.merge()');
     await sleep(150);
     ok(!!q('[data-action="acct-merge"]'), '로컬 여행 병합 안내');
