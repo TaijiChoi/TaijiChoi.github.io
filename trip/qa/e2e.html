@@ -657,7 +657,7 @@
     noOverflow('홈');
 
     /* ===== 7b) v20: 내 여행만 · 방장 전용 일행 관리 · 게스트 차단 · 현재 창 로그인 ===== */
-    await clickSel('[data-action="go-home"]');
+    if (q('[data-action="go-home"]')) await clickSel('[data-action="go-home"]');
     await sleep(300);
     ok(w.TL.Auth.signedIn(), '로그인 상태 유지');
     // 남이 만든 여행은 목록에 없다
@@ -785,8 +785,8 @@
     w.eval('TL.Store.disconnect(); TL.Store.testInjectRemote(null, null);');
 
     /* ===== 게스트 차단 → 현재 창 Google 로그인으로 복귀 ===== */
-    await clickSel('[data-action="go-home"]');
-    await sleep(200);
+    if (q('[data-action="go-home"]')) await clickSel('[data-action="go-home"]');
+    await sleep(250);
     await clickSel('[data-action="open-account"]');
     await sleep(150);
     await clickSel('[data-action="auth-signout"]');
