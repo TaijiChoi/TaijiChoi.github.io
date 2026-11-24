@@ -518,13 +518,13 @@
     await clickSel('[data-action="save-schedule"]');
     ok(!!q('[data-action="sort-day"]'), 'v24 시간순 정렬 버튼 보임');
     ok(text('[data-action="sort-day"]').indexOf('시간순 정렬') >= 0, 'v24 정렬 버튼 문구', text('[data-action="sort-day"]'));
-    var d2Before = w.eval('TL.Core.sortedSchedules(S.trip(' + JSON.stringify(trip.id) + ').data,"d2").map(function(s){return s.time||"미정"}).join(",")');
+    var d2Before = w.eval('TL.Core.sortedSchedules(TL.Store.trip(' + JSON.stringify(trip.id) + ').data,"d2").map(function(s){return s.time||"미정"}).join(",")');
     ok(d2Before === '12:00,12:30,08:00', 'v24 정렬 전에는 드래그 순서 그대로', d2Before);
     await click(q('[data-action="sort-day"]'), 300);
-    var d2After = w.eval('TL.Core.sortedSchedules(S.trip(' + JSON.stringify(trip.id) + ').data,"d2").map(function(s){return s.time||"미정"}).join(",")');
+    var d2After = w.eval('TL.Core.sortedSchedules(TL.Store.trip(' + JSON.stringify(trip.id) + ').data,"d2").map(function(s){return s.time||"미정"}).join(",")');
     ok(d2After === '08:00,12:00,12:30', 'v24 시간순 정렬 결과', d2After);
     ok(text('#toast').indexOf('시간순으로 정렬') >= 0, 'v24 정렬 안내 토스트', text('#toast').slice(0, 30));
-    var orderAfter = w.eval('TL.Core.sortedSchedules(S.trip(' + JSON.stringify(trip.id) + ').data,"d2").map(function(s){return s.order}).join(",")');
+    var orderAfter = w.eval('TL.Core.sortedSchedules(TL.Store.trip(' + JSON.stringify(trip.id) + ').data,"d2").map(function(s){return s.order}).join(",")');
     ok(orderAfter === '0,1,2', 'v24 정렬 뒤 order 0..n-1', orderAfter);
     ok(qa('.tl-item').length === 3, 'v24 정렬 뒤 카드 유지', qa('.tl-item').length);
     noOverflow('시간순 정렬');
