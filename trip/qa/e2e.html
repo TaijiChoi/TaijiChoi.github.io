@@ -1013,11 +1013,12 @@
       .every(function (k) { return typeof authMod[k] === 'function'; }), 'Firebase Auth 모듈 함수 확인', authMod ? 'v10.12.2' : '불러오지 못함');
 
     // 로그아웃 → 게스트 복귀
+    var tripsBeforeLogout = S.trips().length;
     await clickSel('[data-action="auth-signout"]');
     await sleep(400);
     ok(!w.TL.Auth.signedIn(), '로그아웃됨');
     ok(!!q('.auth-btn') && !q('.acct-chip'), '로그아웃 뒤 게스트 헤더');
-    ok(S.trips().length >= 3 && !!S.trip(acctTrip.id), '로그아웃 뒤에도 여행 데이터는 유지', S.trips().length);
+    ok(S.trips().length === tripsBeforeLogout && !!S.trip(acctTrip.id), '로그아웃 뒤에도 여행 데이터는 유지', S.trips().length + '/' + tripsBeforeLogout);
     ok(text('#toast').indexOf('로그아웃') >= 0, '로그아웃 안내 토스트', text('#toast'));
     ok(w.eval('__qaIOState.unsubs') >= 1, '로그아웃: 계정 구독 해지');
     noOverflow('로그아웃 뒤 홈');
