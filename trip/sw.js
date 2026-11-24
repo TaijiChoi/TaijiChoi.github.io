@@ -3,8 +3,8 @@
    · index.html의 ?v= 값과 아래 VERSION을 함께 올린다 (deploy 전 확인: tests/run.py)
    · 같은 버전 안에서 앱 파일만 고쳐 다시 배포할 때는 아래 BUILD 주석을 바꿔 새 서비스워커를 받게 한다
      (스크립트가 바이트까지 같으면 브라우저가 갱신을 건너뛰고 예전 캐시를 계속 쓴다)
-   · BUILD: 23a — v23 도로 경로(OSRM)·카테고리 핀 색·폭파 차단 재점검 */
-var VERSION = '23';
+   · BUILD: 24a — v24 JSON 복원 계정 연결·방장 동기화·정산 1원 보정·시간순 정렬 */
+var VERSION = '24';
 var CACHE = 'triplog-v' + VERSION;
 var ASSETS = [
   './',

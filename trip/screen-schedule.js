@@ -200,7 +200,13 @@
     html += S.dayChips(trip, day, 'pick-day');
     html += '<div class="row between" style="margin:14px 2px 6px">' +
       '<span class="tiny muted">' + Core.daySubLabel(trip, day) + '</span>' +
-      '<span class="tiny muted">' + items.length + '개 일정</span>' +
+      '<span class="row" style="gap:10px">' +
+        (items.length > 1
+          ? '<button type="button" class="chip sort-chip" data-action="sort-day" data-day="' + UI.esc(day) + '" title="이 날 일정을 시간순으로 정렬 (시간 없는 일정은 뒤로)">' +
+            UI.icon('clock', 13) + '시간순 정렬</button>'
+          : '') +
+        '<span class="tiny muted">' + items.length + '개 일정</span>' +
+      '</span>' +
     '</div>';
 
     if (day !== 'prep') html += S.routePanel(trip, day, items, view);

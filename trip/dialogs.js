@@ -907,6 +907,19 @@
     UI.toast('삭제했어요');
   };
 
+  /** v24: 그 날 일정을 시간순으로 (시간 없는 일정은 뒤로) — 드래그 순서는 누를 때만 바뀐다 */
+  A['sort-day'] = function (el) {
+    var trip = TL.App.currentTrip() || tripOf();   // 일정 화면의 여행이 기준 (다른 시트의 여행이 남아 있어도)
+    if (!trip) return;
+    if (!Store.canWrite()) { UI.denyToast('login'); return; }
+    var day = el.getAttribute('data-day') || TL.App.view.day || 'd1';
+    var before = Core.sortedSchedules(trip.data, day).map(function (s) { return s.id; }).join(',');
+    var n = Store.sortDayByTime(trip.id, day);
+    if (!n) { UI.toast('정렬할 일정이 없어요'); return; }
+    var after = Core.sortedSchedules(trip.data, day).map(function (s) { return s.id; }).join(',');
+    UI.toast(before === after ? '이미 시간순으로 정렬되어 있어요' : n + '개 일정을 시간순으로 정렬했어요');
+  };
+
   /* ============================================================== 지출 */
   var rateFetch = { loading: false, error: '' };
 

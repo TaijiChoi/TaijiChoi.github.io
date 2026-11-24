@@ -270,6 +270,9 @@
         if (!UI.requireLogin('로그인하면 일정을 옮길 수 있어요')) return;
         Store.moveSchedule(trip.id, el.getAttribute('data-id'), Number(el.getAttribute('data-dir')));
         break;
+      case 'sort-day':
+        if (!UI.requireLogin('로그인하면 일정을 정렬할 수 있어요')) return;
+        break;
       case 'add-expense': if (!UI.requireLogin('로그인하면 지출을 기록할 수 있어요')) return; TL.Dialogs.expense(trip, null); return;
       case 'edit-expense': if (!UI.requireLogin('로그인하면 지출을 고칠 수 있어요')) return; TL.Dialogs.expense(trip, el.getAttribute('data-id')); return;
     }

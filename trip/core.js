@@ -346,6 +346,23 @@
       return String(a.time || '').localeCompare(String(b.time || ''));
     });
   };
+  /** 하루 일정을 시간순으로: 시간 있는 일정을 빠른 시간부터, 시간 없는 일정은 뒤로
+      · 같은 시간이면 지금 순서를 그대로 둔다(안정 정렬)
+      · 드래그로 정한 순서는 사용자가 이 함수를 부를 때만 바뀐다 */
+  Core.sortByTime = function (list) {
+    var timed = [], untimed = [];
+    (list || []).forEach(function (s, i) {
+      if (!s) return;
+      var t = Core.normTime(s.time);
+      if (/^\d{2}:\d{2}$/.test(t)) timed.push({ s: s, t: t, i: i });
+      else untimed.push({ s: s, i: i });
+    });
+    timed.sort(function (a, b) {
+      if (a.t !== b.t) return a.t < b.t ? -1 : 1;
+      return a.i - b.i;
+    });
+    return timed.map(function (x) { return x.s; }).concat(untimed.map(function (x) { return x.s; }));
+  };
   /** dayKey 순서대로 정렬한 일정 (전체) */
   Core.orderSchedules = function (trip, list) {
     var dayIdx = {};
@@ -420,8 +437,14 @@
       if (!shared.length) shared = ids.slice();
       if (!shared.length) return;
       paid[payer] = (paid[payer] || 0) + krw;
-      var each = krw / shared.length;
-      shared.forEach(function (id) { owed[id] = (owed[id] || 0) + each; });
+      /* v24: 1원 단위로 정확히 나눈다 — 내림 몫 + 나머지를 앞사람부터 1원씩.
+         소수로 더한 뒤 각자 반올림하면 3명 이상에서 합계가 1~2원 어긋났다
+         (sum(balance) ≠ 0, 화면 잔액 합계 ≠ 이체 합계). */
+      var each = Math.floor(krw / shared.length);
+      var rest = krw - each * shared.length;
+      shared.forEach(function (id, i) {
+        owed[id] = (owed[id] || 0) + each + (i < rest ? 1 : 0);
+      });
     });
 
     var rows = members.map(function (m) {
@@ -429,11 +452,18 @@
       var o = Math.round(owed[m.id] || 0);
       return { id: m.id, name: m.name, paid: p, owed: o, balance: p - o };
     });
+    // 마지막 안전장치: 어떤 경우에도 잔액 합계는 0 (차이가 나면 가장 큰 잔액에서 보정)
+    var drift = rows.reduce(function (sum, r) { return sum + r.balance; }, 0);
+    if (drift !== 0 && rows.length) {
+      var top = rows[0];
+      rows.forEach(function (r) { if (Math.abs(r.balance) > Math.abs(top.balance)) top = r; });
+      top.balance -= drift;
+    }
 
-    var debtors = rows.filter(function (r) { return r.balance < -0.5; })
+    var debtors = rows.filter(function (r) { return r.balance < 0; })
       .map(function (r) { return { id: r.id, name: r.name, amount: -r.balance }; })
       .sort(function (a, b) { return b.amount - a.amount; });
-    var creditors = rows.filter(function (r) { return r.balance > 0.5; })
+    var creditors = rows.filter(function (r) { return r.balance > 0; })
       .map(function (r) { return { id: r.id, name: r.name, amount: r.balance }; })
       .sort(function (a, b) { return b.amount - a.amount; });
 

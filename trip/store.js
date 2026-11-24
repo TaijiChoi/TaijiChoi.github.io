@@ -219,7 +219,13 @@
       data: { schedules: [], expenses: [], checklist: [], reservations: [] }
     };
     if (!trip.members.length) trip.members = [{ id: Core.uid('m'), name: state.nickname || meName || '나' }];
-    try { if (TL.Auth && TL.Auth.uid()) trip.ownerUid = TL.Auth.uid(); } catch (e) {}
+    try {
+      var owner = currentUser();
+      if (owner && owner.uid) {
+        trip.ownerUid = owner.uid;
+        if (owner.email) trip.ownerEmail = String(owner.email).toLowerCase();
+      }
+    } catch (e) {}
     // 방장의 일행 한 명에 자기 계정을 연결해 두면 '나' 찾기·정산이 정확해진다
     try {
       var acct = currentUser();
@@ -293,7 +299,7 @@
     notify();
   }
 
-  var META_FIELDS = ['name', 'destination', 'startDate', 'endDate', 'baseCurrency', 'members', 'rates', 'ratesUpdatedAt'];
+  var META_FIELDS = ['name', 'destination', 'startDate', 'endDate', 'baseCurrency', 'members', 'rates', 'ratesUpdatedAt', 'ownerUid', 'ownerEmail'];
   /** 메타 문서에 실어 보낼 값. keys를 주면 그 항목만 담는다(merge 쓰기라 나머지 필드는 그대로 남는다). */  function metaPayload(trip, keys) {
     var use = Array.isArray(keys) && keys.length ? keys : META_FIELDS;
     var out = {};
@@ -302,6 +308,8 @@
       if (k === 'members') out.members = trip.members || [];
       else if (k === 'rates') out.rates = trip.rates || {};
       else if (k === 'baseCurrency') out.baseCurrency = trip.baseCurrency || 'KRW';
+      // v24: 방장 계정은 값이 있을 때만 싣는다 — 빈 값으로 다른 기기의 방장 기록을 지우지 않는다
+      else if (k === 'ownerUid' || k === 'ownerEmail') { if (trip[k]) out[k] = k === 'ownerEmail' ? String(trip[k]).trim().toLowerCase() : String(trip[k]); }
       else out[k] = trip[k] || '';
     });
     out.updatedAt = new Date().toISOString();
@@ -742,6 +750,25 @@
     });
     notify();
   };
+  /** v24: 그 날 일정을 시간순으로 정렬해 order를 다시 매긴다 (시간 없는 일정은 뒤로)
+      · 드래그 수동 순서는 그대로 두고, 사용자가 '시간순 정렬'을 누를 때만 바뀐다
+      · 실시간 공유 중이면 바뀐 일정 문서를 바로 올린다
+      · 정렬한 일정 수를 돌려준다 (0이면 정렬할 것이 없음) */
+  Store.sortDayByTime = function (tripId, dayKey) {
+    if (!Store.canWrite()) { denyLogin(); return 0; }
+    var trip = Store.trip(tripId);
+    if (!trip) return 0;
+    if (!canTouch(trip)) return 0;
+    var group = Core.sortByTime(Core.sortedSchedules(trip.data, dayKey));
+    group.forEach(function (it, i) {
+      if (it.order !== i) {
+        it.order = i;
+        if (trip.remoteCode) remoteWrite(trip, [trip.remoteCode, 'schedules', it.id], stripId(it));
+      }
+    });
+    if (group.length) notify();
+    return group.length;
+  };
   /** 일정을 다른 날로 복사한다 (새 일정, 원본 유지) */
   Store.copySchedule = function (tripId, id, dayKey) {
     var trip = Store.trip(tripId);
@@ -1094,6 +1121,10 @@
           trip.baseCurrency = m.baseCurrency || trip.baseCurrency;
           trip.members = Array.isArray(m.members) ? m.members : trip.members;
           trip.rates = m.rates || trip.rates;
+          // v24: 방장(ownerUid)·방장 이메일도 방 문서에서 받는다 — 다른 기기에서 같은 계정으로
+          //      로그인해도 방장 권한(일행 관리·방 삭제)이 그대로 동작한다
+          if (m.ownerUid) trip.ownerUid = String(m.ownerUid);
+          if (m.ownerEmail) trip.ownerEmail = String(m.ownerEmail).toLowerCase();
           // 다른 기기가 남긴 삭제 기록도 받아들인다 (늦은 쓰기로 되살아난 항목을 다시 숨긴다)
           if (Array.isArray(m.deletedKeys)) {
             m.deletedKeys.forEach(function (d) {
@@ -1129,6 +1160,14 @@
         }));
 
         if (opts.create) {
+          // 방을 처음 만들 때 방장 기록이 비어 있으면 지금 로그인한 계정을 방장으로 남긴다
+          if (!trip.ownerUid) {
+            var owner = currentUser();
+            if (owner && owner.uid) {
+              trip.ownerUid = String(owner.uid);
+              if (owner.email) trip.ownerEmail = String(owner.email).toLowerCase();
+            }
+          }
           var payload = metaPayload(trip);
           payload.createdAt = new Date().toISOString();
           payload.version = 1;
@@ -1409,7 +1448,7 @@
       return Promise.reject(Object.assign(new Error('로그인이 필요해요'), { code: 'need-login' }));
     }
     code = String(code || '').trim().toUpperCase();
-    if (!/^[A-Z0-9]{4,10}$/.test(code)) return Promise.reject(new Error('초대 코드는 영문·숫자 6자리입니다.'));
+    if (!/^[A-Z0-9]{4,10}$/.test(code)) return Promise.reject(new Error('초대 코드는 영문·숫자 4~10자리입니다.'));
     if (nickname && !opts.silent) Store.setNickname(nickname);
     var existing = null;
     state.trips.forEach(function (t) { if (t.remoteCode === code) existing = t; });
@@ -1465,13 +1504,35 @@
   };
 
   /* ---------------------------------------------------- backup / restore */
+  /** 내보내기: 방장·일행 계정 연결 정보까지 함께 담는다
+      (v24 — ownerUid/ownerEmail/memberUids와 일행별 uid·email이 없으면
+       다른 기기에서 복원했을 때 '내 여행만 보기' 필터에 걸려 여행이 안 보였다) */
+  function exportTrip(t) {
+    var out = Object.assign({}, t);
+    var members = (t.members || []).map(function (m) {
+      var o = Object.assign({}, m);
+      if (m && m.uid) o.uid = String(m.uid);
+      if (m && m.email) o.email = String(m.email).trim().toLowerCase();
+      return o;
+    });
+    out.members = members;
+    var ownerUid = String(t.ownerUid || '');
+    out.ownerUid = ownerUid;
+    var ownerEmail = String(t.ownerEmail || '').trim().toLowerCase();
+    if (!ownerEmail && ownerUid) {
+      members.forEach(function (m) { if (!ownerEmail && m.uid && String(m.uid) === ownerUid && m.email) ownerEmail = String(m.email).toLowerCase(); });
+    }
+    out.ownerEmail = ownerEmail;
+    out.memberUids = members.map(function (m) { return m.uid; }).filter(Boolean);
+    return out;
+  }
   Store.exportJSON = function () {
     return JSON.stringify({
       app: 'triplog',
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       nickname: state.nickname,
-      trips: state.trips.map(function (t) { return Object.assign({}, t); })
+      trips: state.trips.map(exportTrip)
     }, null, 2);
   };
   /** 백업 파일의 여행 하나를 앱이 기대하는 모양으로 고친다 (깨진 값은 기본값으로) */
@@ -1505,11 +1566,26 @@
       var base = name, n = 2;
       while (names[name]) { name = (base.slice(0, 9) + ' ' + n).slice(0, 12); n++; }
       names[name] = 1;
-      return { id: id, name: name };
+      var outM = { id: id, name: name };
+      // v24: 일행의 계정 연결(uid·email)도 보존한다
+      var uid = typeof m.uid === 'string' ? m.uid.trim().slice(0, 128) : '';
+      if (uid) outM.uid = uid;
+      var mail = typeof m.email === 'string' ? m.email.trim().toLowerCase().slice(0, 120) : '';
+      if (mail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) outM.email = mail;
+      return outM;
     }).filter(Boolean);
     if (!out.members.length) out.members = [{ id: Core.uid('m'), name: '나' }];
     memIds = {};
     out.members.forEach(function (m) { memIds[m.id] = 1; });
+
+    // v24: 방장 계정(ownerUid·ownerEmail)도 보존한다 — 없으면 복원 뒤 홈 필터에서 숨겨졌다
+    out.ownerUid = typeof t.ownerUid === 'string' ? t.ownerUid.trim().slice(0, 128) : '';
+    out.ownerEmail = typeof t.ownerEmail === 'string' ? t.ownerEmail.trim().toLowerCase().slice(0, 120) : '';
+    out.members.forEach(function (m) {
+      if (!out.ownerEmail && out.ownerUid && m.uid === out.ownerUid && m.email) out.ownerEmail = m.email;
+      if (!out.ownerUid && out.ownerEmail && m.email === out.ownerEmail && m.uid) out.ownerUid = m.uid;
+    });
+    out.memberUids = out.members.map(function (m) { return m.uid; }).filter(Boolean);
 
     if (t.rates && typeof t.rates === 'object') {
       Object.keys(t.rates).forEach(function (k) {
@@ -1610,14 +1686,57 @@
   }
   Store.sanitizeTrip = sanitizeTrip;
 
+  /** v24: 복원한 여행에 지금 로그인한 계정을 연결한다
+      · 방장이 비어 있으면 내 계정을 방장(ownerUid)으로 — 그래야 홈의 '내 여행만 보기'에 나온다
+      · 일행 중 내 계정(uid·email)이나 내 이름과 같은 사람, 없으면 계정이 연결되지 않은 첫 일행에 내 계정을 붙인다
+      · 다른 사람 계정이 이미 붙은 일행은 건드리지 않는다 (남의 연결을 빼앗지 않는다) */
+  function linkImportedTrip(t, acct) {
+    if (!t || !acct || !acct.uid) return false;
+    var uid = String(acct.uid);
+    var mail = acct.email ? String(acct.email).trim().toLowerCase() : '';
+    var changed = false;
+    if (!t.ownerUid) {
+      t.ownerUid = uid;
+      if (mail) t.ownerEmail = mail;
+      changed = true;
+    }
+    var members = t.members || [];
+    var mine = null;
+    members.forEach(function (m) { if (!mine && Core.memberMatches(m, acct)) mine = m; });
+    if (!mine) {
+      var names = [];
+      if (state.nickname) names.push(state.nickname);
+      try { var label = TL.Auth && TL.Auth.displayName ? TL.Auth.displayName() : ''; if (label) names.push(label); } catch (e) {}
+      members.forEach(function (m) {
+        if (mine || names.indexOf(m.name) < 0) return;
+        if (m.uid && String(m.uid) !== uid) return;   // 다른 사람 계정이 붙은 동명이인은 건너뛴다
+        mine = m;
+      });
+    }
+    if (!mine) {
+      // 계정이 하나도 연결되지 않은 첫 일행 — 방장이 아니어도 목록·화면에 열리게
+      members.forEach(function (m) { if (!mine && !m.uid && !m.email) mine = m; });
+    }
+    if (mine) {
+      if (!mine.uid) { mine.uid = uid; changed = true; }
+      if (!mine.email && mail) { mine.email = mail; changed = true; }
+    }
+    if (changed) {
+      t.memberUids = members.map(function (m) { return m.uid; }).filter(Boolean);
+    }
+    return changed;
+  }
+
   Store.importJSON = function (text) {
     var parsed;
     try { parsed = JSON.parse(text); } catch (e) { throw new Error('JSON 파일을 읽을 수 없어요.'); }
     var trips = (parsed && parsed.trips) || (Array.isArray(parsed) ? parsed : null);
     if (!Array.isArray(trips)) throw new Error('백업 파일 형식이 올바르지 않습니다.');
+    var acct = currentUser();
     var added = [];
     trips.forEach(function (raw) {
       var t = sanitizeTrip(raw);
+      if (acct) linkImportedTrip(t, acct);   // v24: 복원한 여행이 홈에서 바로 보이게 내 계정 연결
       while (state.trips.some(function (x) { return x.id === t.id; })) t.id = Core.uid('trip');
       state.trips.push(t);
       added.push(t);
