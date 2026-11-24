@@ -49,6 +49,10 @@
     exp('d1', 320000, 'KRW', 1, 'stay', '숙소 잔금');
     win.TL.Store.add(t.id, 'schedules', { dayKey: 'd1', time: '10:00', title: '우붓 시장', category: 'sight', place: '우붓 시장', lat: -8.5069, lng: 115.2625, source: 'map' });
     win.TL.Store.add(t.id, 'schedules', { dayKey: 'd1', time: '13:00', title: '짬뿌한 폭포', category: 'sight', place: '짬뿌한', lat: -8.5912, lng: 115.2855, source: 'map' });
+    // 캡처에는 '연결 중…' 대신 기기 저장 상태로 보이게 한다
+    var cur = win.TL.Store.trip(t.id);
+    delete cur.remoteCode; delete cur.inviteCode;
+    win.TL.Store.notify();
     window.__tripId = t.id;
     return t.id;
   }
@@ -57,12 +61,13 @@
     win.TL.App.openTrip(window.__tripId, 'money');
     await sleep(350);
     win.TL.Actions['refresh-rates']();
-    await sleep(600);
+    await sleep(3800);
     win.TL.App.render();
     await sleep(400);
     win.scrollTo(0, 0);
     return true;
   };
+  window.__scrollTo = async function (y) { w().scrollTo(0, y); await sleep(250); return true; };
   window.__shotPin = async function () {
     var win = w(), doc = win.document;
     win.TL.App.openTrip(window.__tripId, 'schedule');
