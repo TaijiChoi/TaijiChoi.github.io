@@ -173,7 +173,9 @@
     var n = 0;
     state.trips.forEach(function (t) {
       if (!t || t.ownerUid || t.sample) return;
-      if (t.remoteCode && !t.createdHere) return;
+      // 예전 공유 방(방장·계정 연결이 하나도 없는 방)도 이 계정 것으로 정리한다
+      var legacyRoom = !!t.remoteCode && !(t.members || []).some(function (m) { return m.uid || m.email; });
+      if (t.remoteCode && !t.createdHere && !legacyRoom) return;
       t.ownerUid = String(uid);
       t.createdHere = true;
       n++;
