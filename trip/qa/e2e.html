@@ -1303,7 +1303,7 @@
     await sleep(400);
     if (!q('.trip-head')) { keepSignedIn(); w.eval('TL.App.openTrip("remote_HMHLXW", "schedule")'); await sleep(300); }
     ok(text('#screen').indexOf('국내여행') >= 0, 'v23 예전 방(HMHLXW) 화면 열림', w.TL.App.view.tripId);
-    ok(w.eval('(TL.Store.trip("remote_HMHLXW").members||[]).map(function(m){return m.uid||""}).join(",")') === ',qa1', 'v23 모의 Firestore만 사용(실제 방 아님)', w.eval('(TL.Store.trip("remote_HMHLXW").members||[]).map(function(m){return m.uid||m.name}).join("/")'));
+    ok(w.eval('(TL.Store.trip("remote_HMHLXW").members||[]).map(function(m){return m.uid||""}).join(",")') === ',,qa1', 'v23 모의 Firestore만 사용(실제 방 아님)', w.eval('(TL.Store.trip("remote_HMHLXW").members||[]).map(function(m){return m.uid||m.name}).join("/")'));
     ok(w.eval('TL.Store.trip("remote_HMHLXW").remoteCode') === 'HMHLXW', 'v23 예전 방 초대코드 유지', w.eval('TL.Store.trip("remote_HMHLXW").remoteCode'));
     ok(w.eval('TL.Core.canDestroyRoom(TL.Store.trip("remote_HMHLXW"), { uid: "qa1" })'), 'v23 예전 방: 계정이 연결된 일행이면 방장으로 인정');
     log('INFO', 'v23 진단(삭제 전)', 'signed=' + w.eval('TL.Auth.signedIn()') + ' uid=' + w.eval('String((TL.Auth.currentUser()||{}).uid)') +
