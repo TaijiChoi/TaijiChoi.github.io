@@ -226,22 +226,34 @@
     }, 300);
   };
   UI.copy = function (text) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(text).then(function () { UI.toast('복사했어요'); },
-        function () { UI.fallbackCopy(text); });
-    }
-    UI.fallbackCopy(text);
+    UI.copyAsync(text).then(function (ok) { UI.toast(ok ? '복사했어요' : '복사에 실패했어요'); });
+  };
+  /** 클립보드 복사 → Promise<boolean>. 실패하면 textarea 폴백까지 시도한다. */
+  UI.copyAsync = function (text) {
+    return new Promise(function (resolve) {
+      try {
+        if (typeof navigator !== 'undefined' && navigator && navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () { resolve(true); },
+            function () { resolve(UI.fallbackCopy(text)); });
+          return;
+        }
+      } catch (e) {}
+      resolve(UI.fallbackCopy(text));
+    });
   };
   UI.fallbackCopy = function (text) {
-    var ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand('copy'); UI.toast('복사했어요'); }
-    catch (e) { UI.toast('복사에 실패했어요'); }
-    document.body.removeChild(ta);
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy') !== false; } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
   };
   UI.shareText = function (title, text) {
     if (navigator.share) {

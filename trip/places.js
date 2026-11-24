@@ -159,6 +159,46 @@
     });
   };
 
+  /* ------------------------------------------------------- 역지오코딩 (v22) */
+  var NOMINATIM_REVERSE = 'https://nominatim.openstreetmap.org/reverse';
+  var revCache = {};
+  /** 좌표 → {name, address}. 실패하면 reject (호출한 쪽이 무시해도 된다) */
+  Places.reverse = function (lat, lng) {
+    var a = Number(lat), b = Number(lng);
+    if (!isFinite(a) || !isFinite(b) || Math.abs(a) > 90 || Math.abs(b) > 180) {
+      return Promise.reject(new Error('좌표가 올바르지 않아요'));
+    }
+    var key = a.toFixed(5) + ',' + b.toFixed(5);
+    if (revCache[key]) return Promise.resolve(revCache[key]);
+    if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) {
+      return Promise.reject(new Error('오프라인이라 주소를 찾을 수 없어요'));
+    }
+    var wait = Math.max(0, 1100 - (Date.now() - lastOsmAt));
+    return new Promise(function (r) { setTimeout(r, wait); }).then(function () {
+      lastOsmAt = Date.now();
+      var url = NOMINATIM_REVERSE + '?format=jsonv2&zoom=16&accept-language=ko,en&lat=' + a + '&lon=' + b;
+      var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 9000) : null;
+      return fetch(url, { headers: { 'Accept': 'application/json' }, signal: ctrl ? ctrl.signal : undefined })
+        .then(function (res) {
+          if (timer) clearTimeout(timer);
+          if (!res.ok) throw new Error('주소 검색 응답 오류 (' + res.status + ')');
+          return res.json();
+        }, function (e) {
+          if (timer) clearTimeout(timer);
+          throw e || new Error('주소를 찾지 못했어요');
+        })
+        .then(function (j) {
+          if (!j || j.error) throw new Error('주소를 찾지 못했어요');
+          var ad = j.address || {};
+          var name = j.name || ad.tourism || ad.road || ad.suburb || ad.city || ad.town || ad.village || '';
+          var out = { name: name || '', address: j.display_name || '' };
+          revCache[key] = out;
+          return out;
+        });
+    });
+  };
+
   Places.resultHtml = function (r) {
     return '<div class="pl-main">' +
       '<span class="pl-name">' + TL.Core.esc(r.name || '(이름 없음)') + '</span>' +

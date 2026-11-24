@@ -522,13 +522,42 @@
   };
   A['time-clear'] = function () { setTimeValue(''); };
 
+  function srcLabel(src) {
+    return src === 'osm' ? 'OSM' : src === 'kakao' ? '카카오' : src === 'map' ? '지도' : src === 'coord' ? '좌표' : '직접';
+  }
   function pickedHtml(p) {
     if (!p) return '';
+    var geo = Core.hasGeo(p) ? Core.coordLabel(p.lat, p.lng) : '';
+    var sub = [p.address || '', geo].filter(Boolean).join(' · ');
     return '<span class="pp-dot">' + UI.icon('pin', 14) + '</span>' +
-      '<span class="pp-tx"><b>' + UI.esc(p.name || '') + '</b>' +
-      (p.address ? '<small>' + UI.esc(p.address) + '</small>' : '') + '</span>' +
-      '<span class="pp-src">' + (p.source === 'osm' ? 'OSM' : p.source === 'kakao' ? '카카오' : '직접') + '</span>' +
+      '<span class="pp-tx"><b>' + UI.esc(p.name || (geo ? '지도에서 고른 위치' : '')) + '</b>' +
+      (sub ? '<small>' + UI.esc(sub) + '</small>' : '') + '</span>' +
+      '<span class="pp-src">' + srcLabel(p.source) + '</span>' +
       '<button type="button" class="icon-btn sm" data-action="pl-clear" aria-label="장소 선택 해제">' + UI.icon('close', 15) + '</button>';
+  }
+
+  /** 지도에서 위치 찍기 · 지도 링크/좌표 붙여넣기 (v22) */
+  function coordBoxHtml(p) {
+    var has = p && Core.hasGeo(p);
+    var src = (dlg && dlg.pinSource) || 'google';
+    return '<div class="coord-box">' +
+      '<div class="pl-head"><span class="fl">지도에서 위치</span><span class="pl-modes">' +
+        Core.mapSourceKeys.map(function (k) {
+          return '<button type="button" class="pl-mode' + (src === k ? ' active' : '') + '" data-action="pin-src" data-src="' + k + '">' +
+            Core.mapSource(k).label + '</button>';
+        }).join('') +
+      '</span></div>' +
+      '<div class="inline-add" style="margin-top:0">' +
+        '<input class="input" id="f_coord" placeholder="지도 공유 링크 또는 좌표 (예: -8.65,115.13)" autocomplete="off" enterkeyhint="done">' +
+        '<button type="button" class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="use-coord">적용</button>' +
+      '</div>' +
+      '<div class="coord-line"><span id="coord-status">' +
+        (has ? '📍 ' + UI.esc(Core.coordLabel(p.lat, p.lng)) : '아직 위치를 고르지 않았어요') + '</span>' +
+        '<button type="button" class="btn xs btn-ghost" data-action="pin-toggle" aria-expanded="' + (dlg && dlg.pinOpen ? 'true' : 'false') + '">' +
+          (dlg && dlg.pinOpen ? '지도 접기' : '📍 지도에서 위치 찍기') + '</button></div>' +
+      '<div class="pin-map' + (dlg && dlg.pinOpen ? '' : ' hide') + '" id="pin-map"></div>' +
+      '<div class="hintline">지도를 눌러 핀을 놓으면 위·경도가 채워져요. 구글·카카오·네이버 지도 공유 링크를 붙여넣어도 되고, 이름 검색이 안 되는 해외에서 편해요.</div>' +
+    '</div>';
   }
 
   function placeBoxHtml(p) {
@@ -574,6 +603,7 @@
     if (id && !item) { UI.toast('일정을 찾을 수 없어요'); return; }
     dlg = {
       kind: 'schedule', id: id || null, trip: trip, results: null,
+      pinSource: Core.mapSource((dlg && dlg.pinSource) || 'google').key, pinOpen: false,
       picked: item && (Core.hasGeo(item) || item.placeName || item.address)
         ? {
           name: item.placeName || item.place || item.title || '', address: item.address || '',
@@ -585,6 +615,7 @@
     var day = item ? item.dayKey : (dayKey || TL.App.view.day || 'd1');
     var html = '';
     html += placeBoxHtml(dlg.picked);
+    html += coordBoxHtml(dlg.picked);
     html += '<div class="form-row"><label class="fl">날짜</label><select class="input" id="f_day">' +
       Core.dayList(trip).map(function (d) {
         return '<option value="' + d.key + '"' + (d.key === day ? ' selected' : '') + '>' + d.label +
@@ -659,6 +690,111 @@
     dlg.picked = null;
     var chip = document.getElementById('pl-picked');
     if (chip) { chip.innerHTML = ''; chip.classList.add('hide'); }
+    var st = document.getElementById('coord-status');
+    if (st) st.textContent = '아직 위치를 고르지 않았어요';
+  };
+
+  /* ------------------------------------------ v22: 지도에서 위치 찍기 */
+  function applyCoord(lat, lng, opts) {
+    opts = opts || {};
+    if (!dlg || dlg.kind !== 'schedule') return false;
+    var a = Number(lat), b = Number(lng);
+    if (!Core.validLatLng(a, b)) return false;
+    var name = (dlg.picked && dlg.picked.name) || opts.name || '';
+    if (!dlg.picked || !Core.hasGeo(dlg.picked)) {
+      dlg.picked = { name: name, address: '', lat: a, lng: b, url: '', source: 'map' };
+    } else {
+      dlg.picked.lat = a;
+      dlg.picked.lng = b;
+      dlg.picked.source = 'map';
+    }
+    var st = document.getElementById('coord-status');
+    if (st) st.textContent = '📍 ' + Core.coordLabel(a, b);
+    var chip = document.getElementById('pl-picked');
+    if (chip) { chip.innerHTML = pickedHtml(dlg.picked); chip.classList.remove('hide'); }
+    var placeEl = document.getElementById('f_place');
+    if (placeEl && !placeEl.value.trim()) placeEl.value = dlg.picked.name || '';
+    // 역지오코딩: 이름·주소를 채워 준다 (실패해도 좌표는 남는다)
+    if (TL.Places && TL.Places.reverse) {
+      TL.Places.reverse(a, b).then(function (r) {
+        if (!r || !dlg || dlg.kind !== 'schedule' || !dlg.picked) return;
+        if (Math.abs(Number(dlg.picked.lat) - a) > 1e-6 || Math.abs(Number(dlg.picked.lng) - b) > 1e-6) return;
+        if (!dlg.picked.name) dlg.picked.name = r.name || '';
+        if (!dlg.picked.address) dlg.picked.address = r.address || '';
+        var chip2 = document.getElementById('pl-picked');
+        if (chip2) { chip2.innerHTML = pickedHtml(dlg.picked); chip2.classList.remove('hide'); }
+        var titleEl = document.getElementById('f_title');
+        if (titleEl && !titleEl.value.trim() && r.name) titleEl.value = r.name;
+        var placeEl2 = document.getElementById('f_place');
+        if (placeEl2 && !placeEl2.value.trim() && r.name) placeEl2.value = r.name;
+      }).catch(function () {});
+    }
+    return true;
+  }
+  /** QA·단위 테스트용: 지도를 누른 것과 같은 경로 */
+  D.testPickAt = function (lat, lng) { return applyCoord(lat, lng); };
+
+  function paintPicker() {
+    var box = document.getElementById('pin-map');
+    if (!box || !dlg || !dlg.pinOpen) return;
+    if (!TL.RouteMap || !TL.RouteMap.pickMap) {
+      box.innerHTML = '<div class="pin-note">지도를 쓸 수 없어요. 위 칸에 좌표를 붙여넣어 주세요.</div>';
+      return;
+    }
+    var p = dlg.picked;
+    box.innerHTML = '';
+    TL.RouteMap.pickMap(box, {
+      source: dlg.pinSource || 'google',
+      lat: p && Core.hasGeo(p) ? p.lat : null,
+      lng: p && Core.hasGeo(p) ? p.lng : null,
+      onPick: function (lat, lng) {
+        applyCoord(lat, lng);
+        UI.toast('위치를 잡았어요 · ' + Core.coordLabel(lat, lng), 1800);
+      }
+    }).catch(function (e) {
+      if (!box) return;
+      box.innerHTML = '<div class="pin-note">' + UI.esc((e && e.message) || '지도를 여지 못했어요') +
+        '<br>위 칸에 좌표를 붙여넣어도 돼요.</div>';
+    });
+  }
+
+  A['pin-toggle'] = function (el) {
+    if (!dlg || dlg.kind !== 'schedule') return;
+    var box = document.getElementById('pin-map');
+    dlg.pinOpen = !dlg.pinOpen;
+    if (el) {
+      el.setAttribute('aria-expanded', dlg.pinOpen ? 'true' : 'false');
+      el.textContent = dlg.pinOpen ? '지도 접기' : '📍 지도에서 위치 찍기';
+    }
+    if (!box) return;
+    if (!dlg.pinOpen) {
+      box.classList.add('hide');
+      if (TL.RouteMap && TL.RouteMap.closePicker) TL.RouteMap.closePicker();
+      return;
+    }
+    box.classList.remove('hide');
+    paintPicker();
+  };
+  A['pin-src'] = function (el) {
+    if (!dlg || dlg.kind !== 'schedule') return;
+    dlg.pinSource = Core.mapSource(el.getAttribute('data-src')).key;
+    UI.$$('[data-action="pin-src"]').forEach(function (b) { b.classList.toggle('active', b === el); });
+    if (dlg.pinOpen) {
+      if (TL.RouteMap && TL.RouteMap.closePicker) TL.RouteMap.closePicker();
+      paintPicker();
+    }
+  };
+  A['use-coord'] = function () {
+    if (!dlg || dlg.kind !== 'schedule') return;
+    var raw = UI.val('f_coord');
+    var c = Core.parseCoords(raw);
+    if (!c) {
+      UI.toast('좌표를 찾지 못했어요 · 예: -8.65,115.13 또는 구글지도 링크', 3000);
+      return;
+    }
+    applyCoord(c.lat, c.lng, { source: c.source });
+    if (dlg.pinOpen && TL.RouteMap && TL.RouteMap.recenterPick) TL.RouteMap.recenterPick(c.lat, c.lng);
+    UI.toast('위치를 잡았어요 · ' + Core.coordLabel(c.lat, c.lng), 2200);
   };
 
   A['save-schedule'] = function () {
@@ -801,25 +937,20 @@
     fetchRates(cur);
   }
 
+  /** 고른 통화의 최신 환율을 받아 입력칸에 채운다 (v22: 30분 캐시 · Store가 한 번만 호출) */
   function fetchRates(cur) {
     var target = cur || UI.val('f_currency') || 'KRW';
     if (target === 'KRW') return;
-    if (navigator.onLine === false) { setRateStatus('오프라인 · 기본 환율을 써요'); return; }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { setRateStatus('오프라인 · 기본 환율을 써요'); return; }
     if (rateFetch.loading) return;
     rateFetch.loading = true;
     setRateStatus('자동 환율 불러오는 중…');
-    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 9000) : null;
-    fetch('https://open.er-api.com/v6/latest/KRW', { signal: ctrl ? ctrl.signal : undefined })
-      .then(function (res) { return res.json(); })
-      .then(function (json) {
-        if (timer) clearTimeout(timer);
+    Store.fetchRates()
+      .then(function (rates) {
         rateFetch.loading = false;
-        var rates = Core.ratesFromERAPI(json);
-        if (!rates || !rates[target]) throw new Error('환율을 읽지 못했어요');
-        Store.setRateCache(rates);
         var rateEl = document.getElementById('f_rate');
         var curNow = UI.val('f_currency') || 'KRW';
+        if (!rates[target] && !rates[curNow]) throw new Error('환율을 읽지 못했어요');
         if (rateEl && curNow !== 'KRW' && rates[curNow] && !(dlg && dlg.rateManual)) {
           rateEl.value = rates[curNow];
           setRateStatus('자동 환율 · ' + rateStatusText() + ' 기준');
@@ -827,7 +958,6 @@
         }
       })
       .catch(function (e) {
-        if (timer) clearTimeout(timer);
         rateFetch.loading = false;
         rateFetch.error = (e && e.message) || '실패';
         setRateStatus('자동 환율 실패 · 기본 환율을 써요');
@@ -1044,6 +1174,101 @@
     UI.close();
     if (charged > 0) UI.toast((dlg.id ? '수정했어요' : '지출을 기록했어요') + ' · 실청구 ' + Core.won(charged) + ' 기준', 2800);
     else UI.toast(dlg.id ? '수정했어요' : '지출을 기록했어요');
+  };
+
+  /* ======================================= v22: 가계부 실시간 환율 · 정산 복사 */
+  var ratesUI = { busy: false };
+
+  function fxSummary(trip) {
+    var list = ((trip.data && trip.data.expenses) || []).filter(function (e) {
+      return e.currency && e.currency !== 'KRW' && !(Number(e.chargedKRW) > 0);
+    });
+    var before = 0, after = 0;
+    list.forEach(function (e) {
+      before += Core.expenseKRW(e, trip);
+      after += Core.toKRW(e.amount, e.currency, trip.rates, Store.tripRate(trip, e.currency));
+    });
+    return { count: list.length, before: before, after: after };
+  }
+
+  /** '🔄 실시간 환율 새로고침' — 이 여행의 기본 환율을 최신값으로 바꾼다 */
+  A['refresh-rates'] = function () {
+    var trip = TL.App.currentTrip();
+    if (!trip) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      UI.toast('오프라인이라 환율을 새로고침할 수 없어요 · 연결되면 다시 눌러 주세요', 3200);
+      return;
+    }
+    if (ratesUI.busy) { UI.toast('환율을 불러오는 중이에요'); return; }
+    ratesUI.busy = true;
+    var btn = document.getElementById('rate-refresh');
+    if (btn) { btn.disabled = true; btn.textContent = '환율 불러오는 중…'; }
+    Store.fetchRates().then(function (rates) {
+      ratesUI.busy = false;
+      var saved = Store.applyRates(trip.id, rates);
+      TL.App.render();
+      if (saved && saved.count) {
+        UI.toast('최신 환율로 바꿨어요 · ' + Core.stampLabel(Store.rateCache().fetchedAt) + ' · 기존 지출은 그대로예요', 3200);
+      } else if (saved) {
+        UI.toast('환율을 받았어요 · 이 여행은 아직 외화 지출이 없어요', 2800);
+      } else {
+        UI.toast('환율은 받았지만 이 여행에 저장하지 못했어요', 3000);
+      }
+    }).catch(function (e) {
+      ratesUI.busy = false;
+      TL.App.render();
+      UI.toast('환율 새로고침 실패 · ' + ((e && e.message) || '잠시 뒤 다시 시도해 주세요'), 3400);
+    });
+  };
+
+  /** 기존 외화 지출에 최신 환율을 일괄 적용하기 전에 무엇이 바뀌는지 보여 준다 */
+  A['apply-rates-expenses'] = function () {
+    var trip = TL.App.currentTrip();
+    if (!trip) return;
+    var sum = fxSummary(trip);
+    if (!sum.count) { UI.toast('최신 환율을 적용할 외화 지출이 없어요 · 카드 실청구액이 있는 지출은 그대로 둬요'); return; }
+    dlg = { kind: 'rates-apply', trip: trip, id: null };
+    D.trip = trip;
+    var diff = sum.after - sum.before;
+    var diffTxt = diff === 0 ? '차이 없음' : (diff > 0 ? '+' : '-') + Core.fmt(Math.abs(diff)) + '원';
+    var html = '<div class="note">이 여행의 기본 환율을 <b>이미 기록한 외화 지출 ' + sum.count + '건</b>에도 적용할까요?<br>' +
+      '각 지출에 저장된 환율(입력 당시 값)을 지금 환율로 바꾸고, 원화 합계·정산이 다시 계산돼요.</div>' +
+      '<div class="card flat" style="border:1px solid var(--line);padding:2px 14px">' +
+        '<div class="kv"><span class="k">적용 전 합계</span><span class="v">' + Core.won(sum.before) + '</span></div>' +
+        '<div class="kv"><span class="k">적용 후 합계</span><span class="v">' + Core.won(sum.after) + '</span></div>' +
+        '<div class="kv"><span class="k">차이</span><span class="v">' + diffTxt + '</span></div>' +
+      '</div>' +
+      '<div class="hintline">카드 실청구액이 있는 지출은 실제 청구 금액이라 건드리지 않아요. 나중에 되돌리려면 각 지출의 환율을 직접 고쳐 주세요.</div>' +
+      '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">취소</button>' +
+      '<button class="btn btn-primary" data-action="apply-rates-confirm">' + sum.count + '건에 적용</button></div>';
+    open(html, '기존 지출에 최신 환율 적용');
+  };
+  A['apply-rates-confirm'] = function () {
+    var trip = (dlg && dlg.trip) || TL.App.currentTrip();
+    if (!trip) { UI.close(); return; }
+    var r = Store.applyRatesToExpenses(trip.id);
+    UI.close();
+    if (!r) { UI.toast('적용하지 못했어요 · 잠시 뒤 다시 시도해 주세요'); return; }
+    UI.toast(r.count ? r.count + '건의 환율을 최신값으로 바꿨어요' : '바꿀 지출이 없었어요');
+  };
+
+  /** 정산 결과를 카톡에 붙여넣을 수 있게 복사한다 (실패하면 직접 복사할 수 있게 보여 준다) */
+  D.settleTextSheet = function (text) {
+    var html = '<div class="note">자동 복사가 막혀 있어요. 아래 내용을 길게 눌러 전체 선택한 뒤 복사해 카톡에 붙여넣어 주세요.</div>' +
+      '<textarea class="input" id="settle-text" readonly style="min-height:190px;font-size:13px;line-height:1.6">' + UI.esc(text) + '</textarea>' +
+      '<div class="sheet-foot"><button class="btn btn-primary" data-action="close-modal">닫기</button></div>';
+    open(html, '정산 복사');
+    var ta = document.getElementById('settle-text');
+    if (ta) { try { ta.focus(); ta.select(); } catch (e) {} }
+  };
+  A['copy-settle'] = function () {
+    var trip = TL.App.currentTrip();
+    if (!trip) return;
+    var text = Core.settleText(trip, trip.data);
+    UI.copyAsync(text).then(function (ok) {
+      if (ok) UI.toast('정산을 복사했어요 · 카톡에 붙여넣으세요', 2400);
+      else D.settleTextSheet(text);
+    });
   };
 
   /* ============================================================ 체크리스트 */
@@ -1502,7 +1727,7 @@
     html += '<div class="section-title" style="margin-top:22px"><h2>환율 (참고값)</h2></div>' +
       '<div class="note" style="margin-bottom:8px">지출을 입력할 때 통화별로 직접 고칠 수 있어요. 여기 값은 새 지출의 기본값입니다.</div>';
     html += '<div class="card flat" style="border:1px solid var(--line);padding:6px 14px">' +
-      ['JPY', 'USD', 'EUR', 'THB', 'VND'].map(function (code) {
+      Core.QUICK_RATES.map(function (code) {
         var v = (s.defaultRates[code] || Core.DEFAULT_RATES[code]);
         return '<div class="kv"><span class="k">1 ' + code + ' ' + Core.curInfo(code).symbol + '</span>' +
           '<span class="v" style="max-width:45%"><input class="input" id="rate_' + code + '" inputmode="decimal" value="' + v + '" style="height:38px;text-align:right"></span></div>';

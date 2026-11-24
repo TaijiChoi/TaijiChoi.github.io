@@ -28,6 +28,44 @@
       '</div>' +
     '</div>';
 
+    /* ---- v22: 실시간 환율 (새로고침 + 마지막 갱신 시각) */
+    var fc = Store.rateCache();
+    var stampAt = Number(fc.fetchedAt) || (trip.ratesUpdatedAt ? Date.parse(trip.ratesUpdatedAt) || 0 : 0);
+    var stamp = stampAt ? Core.stampLabel(stampAt) : '아직 갱신 전';
+    var codes = Store.tripRateCodes(trip);
+    var fx = Core.currencyTotals(trip, data);
+    html += '<div class="card pad mt12 rate-card">' +
+      '<div class="section-title"><h2>환율</h2><span class="hint" id="rate-stamp">' +
+        UI.esc(stamp) + (Store.ratesStale() ? ' · 오래됨' : '') + '</span></div>' +
+      (codes.length
+        ? '<div class="rate-list">' + codes.map(function (code) {
+          var r = Store.tripRate(trip, code);
+          return '<div class="rate-line-row"><span class="k">1 ' + UI.esc(code) + ' ' + Core.curInfo(code).symbol + '</span>' +
+            '<span class="v">' + Core.fmt(r, r < 1 ? 4 : 2) + '원</span></div>';
+        }).join('') + '</div>'
+        : '<div class="hintline">이 여행은 외화 지출이 없어 환율을 쓰지 않아요.</div>') +
+      '<div class="rate-actions">' +
+        '<button class="btn btn-soft sm" id="rate-refresh" data-action="refresh-rates">🔄 실시간 환율 새로고침</button>' +
+        (codes.length ? '<button class="btn btn-ghost sm" data-action="apply-rates-expenses">실청구액 없는 외화 지출에도 최신 환율 일괄 적용</button>' : '') +
+      '</div>' +
+      '<div class="hintline">30분이 지나면 가계부에 들어올 때 조용히 최신 환율로 바뀌어요. 이미 적은 지출의 환율은 그대로 두고, 원할 때만 위 버튼으로 일괄 적용해요.</div>' +
+    '</div>';
+
+    /* ---- v22: 현지 통화별 합계 */
+    if (fx.groups.length) {
+      html += '<div class="card pad mt12 fx-card">' +
+        '<div class="section-title"><h2>통화별 합계</h2><span class="hint">원화 환산</span></div>' +
+        fx.groups.map(function (g) {
+          return '<div class="fx-row">' +
+            '<span class="fx-code"><b>' + UI.esc(g.code) + '</b> ' + UI.esc(g.symbol) + '</span>' +
+            '<span class="fx-amt">' + Core.fmt(g.amount, Core.curInfo(g.code).dec) + '</span>' +
+            '<span class="fx-krw">' + Core.won(g.krw) + '<small>' + g.count + '건</small></span>' +
+          '</div>';
+        }).join('') +
+        '<div class="fx-row total"><span class="fx-code"><b>외화 합계</b></span><span class="fx-amt"></span><span class="fx-krw">' + Core.won(fx.krw) + '</span></div>' +
+      '</div>';
+    }
+
     /* ---- 일별 막대 */
     var days = Core.dayList(trip);
     var maxDay = 1;
@@ -119,7 +157,8 @@
     var set = Core.settle(trip, data);
     html += '<div class="card pad mt16">' +
       '<div class="section-title"><h2>정산 (N/1)</h2>' +
-      '<span class="hint">' + (trip.members || []).length + '명 기준</span></div>';
+      '<span class="row gap6"><span class="hint">' + (trip.members || []).length + '명 기준</span>' +
+        '<button class="btn xs btn-ghost" data-action="copy-settle">📋 정산 복사</button></span></div>';
     if (!(trip.members || []).length) {
       html += '<div class="empty-settle">일행을 먼저 등록해 주세요.</div>';
     } else {

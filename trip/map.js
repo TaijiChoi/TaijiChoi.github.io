@@ -144,4 +144,102 @@
     var note = document.querySelector('.map-offline');
     if (note) { note.style.display = 'none'; }
   };
+
+  /* --------------------------------- v22: 일정 시트의 위치 찍기 미니 지도 */
+  var picker = null;
+
+  M.closePicker = function () {
+    if (picker && picker.map) { try { picker.map.remove(); } catch (e) {} }
+    picker = null;
+  };
+  /** 지금 찍힌 위치·지도 종류 (QA 확인용) */
+  M.pickerInfo = function () {
+    if (!picker || !picker.map) return { open: false };
+    return { open: true, source: picker.source, lat: picker.lat, lng: picker.lng };
+  };
+  /** 고른 좌표로 지도를 옮기고 핀을 놓는다 (붙여넣기 좌표 반영) */
+  M.recenterPick = function (lat, lng) {
+    if (!picker || !picker.map) return;
+    try {
+      picker.map.setView([Number(lat), Number(lng)], 15);
+      if (picker.drop) picker.drop(Number(lat), Number(lng), true);
+    } catch (e) {}
+  };
+
+  /**
+   * 작은 지도를 el에 띄우고, 누르거나 핀을 끌면 onPick(lat,lng)을 부른다.
+   * 타일·라이브러리가 없으면 reject — 화면은 좌표 붙여넣기로 계속 쓸 수 있다.
+   */
+  M.pickMap = function (el, opts) {
+    opts = opts || {};
+    if (!el) return Promise.reject(new Error('지도를 넣을 자리가 없어요'));
+    if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) {
+      return Promise.reject(new Error('오프라인이라 지도를 불러올 수 없어요'));
+    }
+    M.closePicker();
+    var src = Core.mapSource(opts.source);
+    var my = { el: el, source: src.key, lat: null, lng: null };
+    picker = my;
+    var hasCenter = Core.validLatLng(opts.lat, opts.lng);
+    return M.ensure().then(function (L) {
+      if (picker !== my) throw new Error('지도를 닫았어요');
+      var m = L.map(el, { zoomControl: true, attributionControl: true, scrollWheelZoom: false });
+      my.map = m;
+      var tiles = 0;
+      var layer = L.tileLayer(src.url, {
+        maxZoom: src.maxZoom, subdomains: src.subdomains, attribution: src.attribution, crossOrigin: true
+      }).addTo(m);
+      layer.on('tileload', function () { tiles++; });
+      layer.on('tileerror', function () {
+        // 구글 타일이 막혔을 때: OSM으로 한 번만 바꿔 본다
+        if (picker !== my || src.key !== 'google' || tiles > 0 || my.swapped) return;
+        my.swapped = true;
+        try { m.removeLayer(layer); } catch (e) {}
+        var osm = Core.mapSource('osm');
+        my.source = 'osm';
+        L.tileLayer(osm.url, { maxZoom: osm.maxZoom, attribution: osm.attribution, crossOrigin: true }).addTo(m);
+        var note = el.parentNode && el.parentNode.querySelector('.pin-note');
+        if (note) note.textContent = '구글지도 타일을 불러오지 못해 OSM으로 바꿨어요';
+      });
+      m.setView(hasCenter ? [Number(opts.lat), Number(opts.lng)] : [8, 108], hasCenter ? 14 : 3);
+      my.lat = hasCenter ? Number(opts.lat) : null;
+      my.lng = hasCenter ? Number(opts.lng) : null;
+
+      function drop(lat, lng, silent) {
+        var a = Number(lat), b = Number(lng);
+        if (!Core.validLatLng(a, b)) return;
+        if (!my.marker) {
+          var icon = L.divIcon({ className: 'pin-icon', html: '<span>📍</span>', iconSize: [30, 30], iconAnchor: [15, 28] });
+          my.marker = L.marker([a, b], { icon: icon, draggable: true }).addTo(m);
+          my.marker.on('dragend', function () {
+            var p = my.marker.getLatLng();
+            drop(p.lat, p.lng);
+          });
+        } else {
+          my.marker.setLatLng([a, b]);
+        }
+        my.lat = a; my.lng = b;
+        if (!silent && opts.onPick) opts.onPick(a, b);
+      }
+      my.drop = drop;
+      if (hasCenter) drop(my.lat, my.lng, true);
+      m.on('click', function (e) { drop(e.latlng.lat, e.latlng.lng); });
+      el.classList.add('ready');
+      setTimeout(function () { try { if (picker === my) m.invalidateSize(); } catch (e) {} }, 60);
+      return my;
+    }).catch(function (e) {
+      if (picker === my) picker = null;
+      throw e;
+    });
+  };
+
+  // 어떤 시트든 닫힐 때 미니 지도를 정리한다 (Leaflet 핸들·타일이 남지 않게)
+  if (TL.UI && TL.UI.close && !TL.UI.__pinCloseWrapped) {
+    var closeModal = TL.UI.close;
+    TL.UI.close = function () {
+      M.closePicker();
+      return closeModal.apply(this, arguments);
+    };
+    TL.UI.__pinCloseWrapped = true;
+  }
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -90,6 +90,7 @@
         UI.toast('실시간 연결 실패: ' + (e.message || e));
       });
     }
+    autoRates(trip);
   };
 
   App.setTab = function (tab) {
@@ -98,7 +99,17 @@
     setHash();
     render();
     window.scrollTo(0, 0);
+    if (tab === 'money') autoRates(App.currentTrip());
   };
+
+  /** v22: 환율이 30분 넘었으면 조용히 최신화를 시도한다 (실패는 알리지 않음) */
+  function autoRates(trip) {
+    if (!trip || !TL.Store || !TL.Store.autoRefreshRates) return;
+    try {
+      var p = TL.Store.autoRefreshRates(trip);
+      if (p && p.catch) p.catch(function () {});
+    } catch (e) {}
+  }
 
   /* ------------------------------------------------------------- render */
   function tabbarHtml(active) {
@@ -300,6 +311,7 @@
     if (id === 'f_name' || id === 'f_dest') { ev.preventDefault(); }
     if (id === 'f_amount') { ev.preventDefault(); }
     if (id === 'pl_q') { ev.preventDefault(); if (A['pl-search']) A['pl-search'](); }
+    if (id === 'f_coord') { ev.preventDefault(); if (A['use-coord']) A['use-coord'](); }
     if (id === 'f_charged') { ev.preventDefault(); }
   });
 
@@ -512,6 +524,7 @@
           if (e && e.code === 'notfound') goneHome(t.id);
         });
       }
+      autoRates(t);
     }
   }
 

@@ -293,7 +293,7 @@
     notify();
   }
 
-  var META_FIELDS = ['name', 'destination', 'startDate', 'endDate', 'baseCurrency', 'members', 'rates'];
+  var META_FIELDS = ['name', 'destination', 'startDate', 'endDate', 'baseCurrency', 'members', 'rates', 'ratesUpdatedAt'];
   /** 메타 문서에 실어 보낼 값. keys를 주면 그 항목만 담는다(merge 쓰기라 나머지 필드는 그대로 남는다). */  function metaPayload(trip, keys) {
     var use = Array.isArray(keys) && keys.length ? keys : META_FIELDS;
     var out = {};
@@ -789,14 +789,159 @@
     };
     notify();
   };
-  /** 캐시가 신선하면 자동 환율, 아니면 0 */
+  /** v22: 환율은 30분까지만 믿는다 (그 뒤에는 백그라운드로 새로 받는다) */
+  Store.RATE_TTL = 30 * 60 * 1000;
+  Store.ratesAge = function () {
+    var c = Store.rateCache();
+    return c.fetchedAt ? Math.max(0, Date.now() - c.fetchedAt) : Infinity;
+  };
+  /** 캐시가 없거나 ttl(기본 30분)보다 오래됐으면 true */
+  Store.ratesStale = function (ttl) {
+    var limit = ttl == null ? Store.RATE_TTL : Number(ttl);
+    var c = Store.rateCache();
+    if (!c.fetchedAt) return true;
+    var age = Date.now() - c.fetchedAt;
+    return !(age >= 0 && age <= limit);
+  };
+  /** 캐시가 신선하면 자동 환율, 아니면 0 (기본 30분) */
   Store.cachedAutoRate = function (code, maxAgeMs) {
     var c = Store.rateCache();
     var age = Date.now() - c.fetchedAt;
-    var limit = maxAgeMs == null ? 12 * 3600 * 1000 : maxAgeMs;
+    var limit = maxAgeMs == null ? Store.RATE_TTL : maxAgeMs;
     var v = Number(c.rates[code]);
     if (c.fetchedAt && age >= 0 && age <= limit && isFinite(v) && v > 0) return v;
     return 0;
+  };
+
+  /* ------------------------------------------------------ 환율 새로고침 (v22) */
+  var ratesFetching = null;
+  var ratesFetcher = null;          // 테스트·QA에서 실제 네트워크 대신 쓸 함수
+  /** QA·테스트용: 환율을 대신 돌려줄 함수를 꽂는다. null이면 실제 open.er-api.com */
+  Store.testSetRateFetcher = function (fn) { ratesFetcher = typeof fn === 'function' ? fn : null; };
+
+  function defaultRateFetch() {
+    if (typeof fetch !== 'function') return Promise.reject(new Error('이 브라우저에서는 환율을 불러올 수 없어요'));
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 9000) : null;
+    return fetch('https://open.er-api.com/v6/latest/KRW', { signal: ctrl ? ctrl.signal : undefined })
+      .then(function (res) {
+        if (timer) clearTimeout(timer);
+        if (res && res.ok === false) throw new Error('환율 서버 응답 오류 (' + res.status + ')');
+        return res.json();
+      }, function (e) {
+        if (timer) clearTimeout(timer);
+        throw e || new Error('환율 서버에 닿지 못했어요');
+      })
+      .then(function (json) {
+        var rates = Core.ratesFromERAPI(json);
+        if (!rates || !Object.keys(rates).length) throw new Error('환율을 읽지 못했어요');
+        return rates;
+      });
+  }
+
+  /** 최신 환율을 받아 기기 캐시에 저장한다. 동시에 여러 번 불러도 한 번만 나간다. */
+  Store.fetchRates = function () {
+    if (ratesFetching) return ratesFetching;
+    var p;
+    try { p = (ratesFetcher || defaultRateFetch)(); } catch (e) { return Promise.reject(e); }
+    ratesFetching = Promise.resolve(p).then(function (rates) {
+      ratesFetching = null;
+      if (!rates || typeof rates !== 'object' || !Object.keys(rates).length) throw new Error('환율을 읽지 못했어요');
+      Store.setRateCache(rates);
+      return Store.rateCache().rates;
+    }, function (e) {
+      ratesFetching = null;
+      throw e || new Error('환율을 불러오지 못했어요');
+    });
+    return ratesFetching;
+  };
+
+  /** 이 여행이 외화를 쓰는가 (기본 통화 또는 외화 지출이 있음) */
+  Store.usesForeign = function (trip) {
+    if (!trip) return false;
+    if (trip.baseCurrency && trip.baseCurrency !== 'KRW') return true;
+    return ((trip.data && trip.data.expenses) || []).some(function (e) {
+      return e.currency && e.currency !== 'KRW';
+    });
+  };
+  /** 이 여행이 쓰는 통화 코드(기본 통화·저장된 환율·외화 지출) */
+  Store.tripRateCodes = function (trip) {
+    var set = {};
+    if (!trip) return [];
+    if (trip.baseCurrency && trip.baseCurrency !== 'KRW') set[trip.baseCurrency] = 1;
+    Object.keys(trip.rates || {}).forEach(function (k) { if (k !== 'KRW') set[k] = 1; });
+    ((trip.data && trip.data.expenses) || []).forEach(function (e) {
+      if (e.currency && e.currency !== 'KRW') set[e.currency] = 1;
+    });
+    return Object.keys(set);
+  };
+  /**
+   * 최신 환율을 이 여행의 기본 환율(trip.rates)에 반영한다.
+   * 기존 지출의 rate는 건드리지 않는다(입력 당시 환율을 기억).
+   */
+  Store.applyRates = function (tripId, rates, at) {
+    var trip = Store.trip(tripId);
+    if (!trip || !rates) return null;
+    var codes = Store.tripRateCodes(trip);
+    var next = Object.assign({}, trip.rates || {});
+    var used = 0;
+    codes.forEach(function (code) {
+      var v = Number(rates[code]);
+      if (!isFinite(v) || v <= 0 || code === 'KRW') return;
+      next[code] = v;
+      used++;
+    });
+    if (!used) return { count: 0, codes: [] };
+    var stamp = new Date(at == null ? Date.now() : Number(at)).toISOString();
+    var saved = Store.updateTrip(tripId, { rates: next, ratesUpdatedAt: stamp });
+    return saved ? { count: used, codes: codes, at: stamp } : null;
+  };
+  /**
+   * 실청구액이 없는 외화 지출을 이 여행의 최신 환율로 다시 계산한다 (사용자가 고를 때만).
+   * 카드 실청구액(chargedKRW)이 있는 지출은 그 금액이 실제 청구라 건드리지 않는다.
+   */
+  Store.applyRatesToExpenses = function (tripId) {
+    var trip = Store.trip(tripId);
+    if (!trip || !Store.canWrite()) return null;
+    var before = 0, after = 0, count = 0, kept = 0;
+    var list = (trip.data && trip.data.expenses) || [];
+    list.forEach(function (e) {
+      if (!e.currency || e.currency === 'KRW') return;
+      if (Number(e.chargedKRW) > 0) { kept++; return; }
+      var r = Store.tripRate(trip, e.currency);
+      var oldR = Number(e.rate);
+      if (!(r > 0)) return;
+      var oldK = Core.expenseKRW(e, trip);
+      var newK = Core.toKRW(e.amount, e.currency, trip.rates, r);
+      if (isFinite(oldR) && oldR > 0 && Math.abs(oldR - r) < 1e-9) { kept++; return; }
+      before += oldK;
+      after += newK;
+      count++;
+      e.rate = r;
+      Store.update(tripId, 'expenses', e.id, { rate: r });
+    });
+    return { count: count, kept: kept, before: before, after: after };
+  };
+  /**
+   * 여행을 열거나 가계부에 들어올 때 부르는 조용한 최신화.
+   * 온라인 + 외화 사용 + 캐시 만료(30분)일 때만 나가고, 실패는 조용히 넘긴다.
+   */
+  var autoRatesBusy = {};
+  Store.autoRefreshRates = function (trip, opts) {
+    if (!trip || !Store.canWrite()) return Promise.resolve(false);
+    if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) return Promise.resolve(false);
+    if (!Store.usesForeign(trip)) return Promise.resolve(false);
+    if (!Store.ratesStale(opts && opts.ttl)) return Promise.resolve(false);
+    if (autoRatesBusy[trip.id]) return Promise.resolve(false);
+    autoRatesBusy[trip.id] = true;
+    return Store.fetchRates().then(function (rates) {
+      autoRatesBusy[trip.id] = false;
+      var saved = Store.applyRates(trip.id, rates);
+      return !!(saved && saved.count);
+    }, function () {
+      autoRatesBusy[trip.id] = false;
+      return false;
+    });
   };
 
   /* ------------------------------------------------------ 연결 상태 */

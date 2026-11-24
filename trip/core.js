@@ -43,6 +43,7 @@
     { code: 'EUR', symbol: '€', name: '유로', dec: 2, rate: 1490 },
     { code: 'VND', symbol: '₫', name: '베트남 동', dec: 0, rate: 0.054 },
     { code: 'THB', symbol: '฿', name: '태국 바트', dec: 2, rate: 38.5 },
+    { code: 'IDR', symbol: 'Rp', name: '인도네시아 루피아', dec: 0, rate: 0.088 },
     { code: 'TWD', symbol: 'NT$', name: '대만 달러', dec: 0, rate: 42 },
     { code: 'CNY', symbol: '¥', name: '중국 위안', dec: 2, rate: 190 },
     { code: 'HKD', symbol: 'HK$', name: '홍콩 달러', dec: 2, rate: 176 },
@@ -57,6 +58,8 @@
     Core.CURRENCIES.forEach(function (c) { o[c.code] = c.rate; });
     return o;
   })();
+  /** 여행 설정에 빠른 환율로 보여 줄 통화 (v22: 인도네시아 루피아 포함) */
+  Core.QUICK_RATES = ['JPY', 'USD', 'EUR', 'THB', 'VND', 'IDR'];
   Core.curInfo = function (code) {
     for (var i = 0; i < Core.CURRENCIES.length; i++) if (Core.CURRENCIES[i].code === code) return Core.CURRENCIES[i];
     return { code: code || 'KRW', symbol: code || '₩', name: code || '원', dec: 0, rate: 1 };
@@ -651,7 +654,23 @@
   };
 
   /* ---------------------------------------------------------- rates */
-  /** open.er-api.com/v6/latest/KRW 응답 → {JPY: 9.43, USD: 1375, ...} (1단위당 원화) */
+  /**
+   * 1단위당 원화 환율 반올림 (v22).
+   * - 1원 이상(JPY·USD 등): 소수 2자리 — 기존 표시·테스트와 같다.
+   * - 1원 미만(VND·IDR 등): 소수 4자리까지 남긴다. 작은 값이 0으로 뭉개지면
+   *   Rp 1,250,000 같은 큰 현지 금액이 0원이 되므로, 0이 되면 유효숫자로 살린다.
+   */
+  Core.roundRate = function (per) {
+    var v = Number(per);
+    if (!(v > 0) || !isFinite(v)) return 0;
+    if (v >= 1) return Math.round(v * 100) / 100;
+    var four = Math.round(v * 10000) / 10000;
+    if (four > 0) return four;
+    var digits = Math.min(12, Math.ceil(-Math.log(v) / Math.LN10) + 3);
+    var p = Math.pow(10, digits);
+    return Math.round(v * p) / p;
+  };
+  /** open.er-api.com/v6/latest/KRW 응답 → {JPY: 9.43, USD: 1375, IDR: 0.086, ...} (1단위당 원화) */
   Core.ratesFromERAPI = function (payload) {
     if (!payload || payload.result === 'error') return null;
     var r = payload.rates;
@@ -663,9 +682,139 @@
       if (!(v > 0)) return;
       var per = 1 / v;
       if (!(per > 0) || !isFinite(per)) return;
-      out[code] = per >= 1 ? Math.round(per * 100) / 100 : Math.round(per * 10000) / 10000;
+      var rounded = Core.roundRate(per);
+      if (rounded > 0) out[code] = rounded;
     });
     return out;
+  };
+
+  /** 환율 캐시 시각 표시: 같은 날이면 '10:30 기준', 다른 날이면 '11.23 10:30 기준' */
+  Core.stampLabel = function (ts, now) {
+    var t = Number(ts);
+    if (!isFinite(t) || t <= 0) return '';
+    var d = new Date(t);
+    var n = new Date(now == null ? Date.now() : Number(now));
+    var hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    var same = d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+    return (same ? hm : pad(d.getMonth() + 1) + '.' + pad(d.getDate()) + ' ' + hm) + ' 기준';
+  };
+
+  /** 좌표 표시: '37.5665, 126.978' (끝의 0은 지운다) */
+  Core.coordLabel = function (lat, lng) {
+    var a = Number(lat), b = Number(lng);
+    if (!isFinite(a) || !isFinite(b)) return '';
+    function f(v) {
+      var s = v.toFixed(5);
+      if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+      return s;
+    }
+    return f(a) + ', ' + f(b);
+  };
+
+  var NUM_RE = '(-?\\d{1,3}(?:\\.\\d+)?)';
+  /** 위경도가 실제 좌표 범위인지 (0,0은 '없음'으로 본다) */
+  Core.validLatLng = function (lat, lng) {
+    var a = Number(lat), b = Number(lng);
+    if (!isFinite(a) || !isFinite(b)) return false;
+    if (Math.abs(a) > 90 || Math.abs(b) > 180) return false;
+    if (a === 0 && b === 0) return false;
+    return true;
+  };
+  function coordOut(lat, lng, src) {
+    var a = Number(lat), b = Number(lng);
+    if (!Core.validLatLng(a, b)) return null;
+    return { lat: a, lng: b, source: src || 'coord' };
+  }
+
+  /**
+   * 지도 공유 링크·좌표 문자열 → {lat, lng, source} (v22)
+   *  - 구글: `@-8.65,115.13,15z`, `?q=-8.65,115.13`, `!3d-8.65!4d115.13`
+   *  - 카카오: `map.kakao.com/link/to/이름,37.5,127.0`, `?lat=..&lng=..`
+   *  - 네이버: `?c=127.0,37.5,14z`(경도,위도 순), `elng=..&elat=..`
+   *  - OSM: `#map=15/-8.65/115.13`, 일반 `lat,lng` · `lat=..&lng=..`
+   * 못 찾으면 null.
+   */
+  Core.parseCoords = function (text) {
+    var s = String(text == null ? '' : text).trim();
+    if (!s) return null;
+    var m, out;
+    // 1) 구글 지도 data= 의 !3d/!4d (장소 정확 좌표)
+    m = new RegExp('!3d' + NUM_RE + '!4d' + NUM_RE).exec(s);
+    if (m && (out = coordOut(m[1], m[2], 'google'))) return out;
+    // 2) 구글 @lat,lng,zoom
+    m = new RegExp('@' + NUM_RE + '\\s*,\\s*' + NUM_RE).exec(s);
+    if (m && (out = coordOut(m[1], m[2], 'google'))) return out;
+    // 3) OSM #map=zoom/lat/lng
+    m = new RegExp('#map=\\d+(?:\\.\\d+)?\\/' + NUM_RE + '\\/' + NUM_RE).exec(s);
+    if (m && (out = coordOut(m[1], m[2], 'osm'))) return out;
+    // 4) 카카오 링크 /link/(map|to|from)/이름,lat,lng
+    m = new RegExp('\\/link\\/(?:map|to|from)\\/[^,]*,' + NUM_RE + '\\s*,\\s*' + NUM_RE).exec(s);
+    if (m && (out = coordOut(m[1], m[2], 'kakao'))) return out;
+    // 5) lat=..&lng=.. / latitude=..&longitude=.. / elat=..&elng=.. / mlat / mlng
+    var labeled = [
+      ['lat', 'lng', 'naver'], ['latitude', 'longitude', 'coord'],
+      ['elat', 'elng', 'naver'], ['mlat', 'mlng', 'naver'],
+      ['y', 'x', 'kakao']
+    ];
+    for (var i = 0; i < labeled.length; i++) {
+      var reA = new RegExp('(?:^|[?&#/])' + labeled[i][0] + '=' + NUM_RE), reB = new RegExp('(?:^|[?&#/])' + labeled[i][1] + '=' + NUM_RE);
+      var ma = reA.exec(s), mb = reB.exec(s);
+      if (ma && mb && (out = coordOut(ma[1], mb[1], labeled[i][2]))) return out;
+    }
+    // 6) 네이버 c=경도,위도,줌 (c=37.5,127.0 처럼 위도가 먼저 오는 경우도 있어 둘 다 본다)
+    m = new RegExp('(?:^|[?&#])c=' + NUM_RE + '\\s*,\\s*' + NUM_RE).exec(s);
+    if (m) {
+      out = coordOut(m[1], m[2], 'naver');
+      if (out) return out;
+      out = coordOut(m[2], m[1], 'naver');
+      if (out) return out;
+    }
+    // 7) ?q= 또는 query= 안의 좌표
+    m = new RegExp('(?:[?&](?:q|query|destination)=)' + NUM_RE + '\\s*,\\s*' + NUM_RE).exec(s);
+    if (m && (out = coordOut(m[1], m[2], 'google'))) return out;
+    // 8) 그냥 좌표 'lat,lng' / 'lat lng' (링크에 섞여 있어도 첫 쌍)
+    m = new RegExp('(?:^|[^\\d.-])' + NUM_RE + '\\s*[, ]\\s*' + NUM_RE + '(?:[^\\d.]|$)').exec(s);
+    if (m && (out = coordOut(m[1], m[2], 'coord'))) return out;
+    return null;
+  };
+
+  /** 현지 통화별 합계 (원화 환산 포함). 외화 지출이 없으면 groups: [] */
+  Core.currencyTotals = function (trip, data) {
+    var by = {}, order = [];
+    ((data && data.expenses) || []).forEach(function (e) {
+      var code = e.currency && e.currency !== 'KRW' ? e.currency : '';
+      if (!code) return;
+      if (!by[code]) { by[code] = { code: code, symbol: Core.curInfo(code).symbol, amount: 0, krw: 0, count: 0 }; order.push(code); }
+      by[code].amount += Core.num(e.amount, 0);
+      by[code].krw += Core.expenseKRW(e, trip);
+      by[code].count++;
+    });
+    var groups = order.map(function (k) { return by[k]; }).sort(function (a, b) { return b.krw - a.krw; });
+    var krw = 0;
+    groups.forEach(function (g) { krw += g.krw; });
+    return { groups: groups, krw: krw, count: groups.length };
+  };
+
+  /** 카톡에 붙여넣을 정산 텍스트 (v22) */
+  Core.settleText = function (trip, data) {
+    var set = Core.settle(trip, data);
+    var t = Core.totals(trip, data);
+    var members = (trip && trip.members) || [];
+    var lines = [];
+    lines.push('[' + ((trip && trip.name) || '여행') + '] 정산');
+    lines.push('총지출 ' + Core.won(t.total) + ' · ' + members.length + '명');
+    if (set.transfers && set.transfers.length) {
+      lines.push('');
+      lines.push('보낼 돈');
+      set.transfers.forEach(function (tr) {
+        lines.push('· ' + tr.fromName + ' → ' + tr.toName + ' ' + Core.won(tr.amount));
+      });
+    } else {
+      lines.push('');
+      lines.push('✅ ' + (set.hint || '보낼 돈이 없어요'));
+    }
+    if (set.excluded > 0) lines.push('(나만 보기 ' + Core.won(set.excluded) + ' 제외)');
+    return lines.join('\n');
   };
 
   /* ---------------------------------------------------- reservations */

@@ -4,7 +4,7 @@
    · 같은 버전 안에서 앱 파일만 고쳐 다시 배포할 때는 아래 BUILD 주석을 바꿔 새 서비스워커를 받게 한다
      (스크립트가 바이트까지 같으면 브라우저가 갱신을 건너뛰고 예전 캐시를 계속 쓴다)
    · BUILD: 20b — 예전 공유 방 소유자 정리·삭제 되살아나기 방지 보강 */
-var VERSION = '21';
+var VERSION = '22';
 var CACHE = 'triplog-v' + VERSION;
 var ASSETS = [
   './',
