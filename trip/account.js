@@ -124,6 +124,19 @@
     clearTimeout(timers[code]);
     timers[code] = setTimeout(function () { delete timers[code]; registerTrip(trip); }, 1200);
   };
+  /** 계정 여행 목록에서 뺀다 (방장이 방을 삭제했거나, 서버에 없는 방일 때) */
+  Account.forget = function (code) {
+    code = String(code || '').trim().toUpperCase();
+    if (!code || !/^[A-Z0-9]{4,10}$/.test(code) || !Account.signedIn()) return Promise.resolve(false);
+    delete registered[me.uid + ':' + code];
+    clearTimeout(timers[code]);
+    delete timers[code];
+    docs = docs.filter(function (d) {
+      return String((d && (d.code || d.remoteCode || d.id)) || '').toUpperCase() !== code;
+    });
+    notify();
+    return Promise.resolve(api().deleteDoc(tripDocPath(me.uid, code))).then(function () { return true; }, function () { return false; });
+  };
 
   function tlErr(e) {
     var s = String((e && (e.code || e.message)) || e);
@@ -233,6 +246,11 @@
             out.pulled++;
           }).catch(function (e) {
             out.failed.push(code);
+            if (e && e.code === 'notfound') {
+              // 서버에 없는(폭파된) 방 — 계정 목록에 남겨두지 않는다
+              Account.forget(code);
+              return;
+            }
             error = tlErr(e);
           });
         });

@@ -86,6 +86,7 @@
     window.scrollTo(0, 0);
     if (trip.remoteCode) {
       Store.openRemote(trip.id).catch(function (e) {
+        if (e && e.code === 'notfound') { goneHome(trip.id); return; }
         UI.toast('실시간 연결 실패: ' + (e.message || e));
       });
     }
@@ -411,6 +412,15 @@
   /* --------------------------------------------------------------- boot */
   var pendingCode = '';   // 로그인 전에 열린 초대 링크 — 로그인하면 이어서 참여한다
 
+  /** 서버가 '없거나 폭파된 방'을 확인했을 때: 이 기기 목록에서도 지우고 홈으로 돌려보낸다 */
+  function goneHome(tripId) {
+    if (tripId && Store.trip(tripId)) Store.removeTrip(tripId);
+    var cur = Store.currentTrip();
+    if (!cur || (App.view.tripId && !Store.trip(App.view.tripId))) App.goHome();
+    else render();
+    UI.toast(Store.GONE_MESSAGE, 3600);
+  }
+
   function tryJoin(code, opts) {
     if (!Store.firebaseConfig()) {
       render();
@@ -427,6 +437,14 @@
       cleanUrl();
       TL.Dialogs.maybeWhoAmI(Store.trip(t.id));
     }).catch(function (e) {
+      if (e && e.code === 'notfound') {
+        // 폭파된 방·없는 코드: 참여시키지 않고 목록으로 튕겨낸다
+        pendingCode = '';
+        cleanUrl();
+        UI.close();
+        goneHome('');
+        return;
+      }
       var needLogin = e && e.code === 'need-login';
       UI.toast(needLogin ? '로그인한 뒤 초대 링크를 다시 열어 주세요' : '참여 실패: ' + (e.message || e), 4000);
       TL.Dialogs.join();
@@ -459,6 +477,7 @@
     var initial = parse();
 
     Store.onChange(function (info) {
+      if (info && info.gone) { goneHome(info.tripId); return; }
       if (info && info.error) return; // 오류는 render에서 토스트
       render();
     });
@@ -488,7 +507,11 @@
     registerSW();
     if (initial.screen === 'trip') {
       var t = Store.trip(initial.tripId);
-      if (t && t.remoteCode) Store.openRemote(t.id).catch(function () {});
+      if (t && t.remoteCode) {
+        Store.openRemote(t.id).catch(function (e) {
+          if (e && e.code === 'notfound') goneHome(t.id);
+        });
+      }
     }
   }
 

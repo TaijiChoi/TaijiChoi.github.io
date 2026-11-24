@@ -26,6 +26,10 @@
     measurementId: 'G-68X0HJ92GN'
   };
 
+  /** 서버가 '방이 없다·폭파됐다'를 확인했을 때 보여 줄 말 (앱·안내가 같은 문구를 쓴다) */
+  var GONE_MESSAGE = '삭제되었거나 유효하지 않은 초대 링크예요.';
+  Store.GONE_MESSAGE = GONE_MESSAGE;
+
   var listeners = [];
   var app = null;          // firebase app
   var fs = null;           // firestore module
@@ -114,6 +118,12 @@
     return function () { listeners = listeners.filter(function (f) { return f !== cb; }); };
   };
   Store.notify = notify;
+  /** 보던 방이 서버에서 폭파됐다 — 화면이 이 기기 목록에서 지우고 홈으로 돌아갈 수 있게 알린다 */
+  function roomGone(code, tripId) {
+    listeners.slice().forEach(function (cb) {
+      try { cb({ gone: String(code || ''), tripId: String(tripId || '') }); } catch (e) { console.error(e); }
+    });
+  }
 
   /* -------------------------------------------------------------- trips */
   Store.trips = function () {
@@ -268,9 +278,20 @@
   Store.removeTrip = function (id) {
     state.trips = state.trips.filter(function (t) { return t.id !== id; });
     if (state.currentTripId === id) state.currentTripId = null;
+    if (state.meByTrip) delete state.meByTrip[id];
     if (conn && conn.tripId === id) closeConn();
     notify();
   };
+  /** 이 기기 목록과 계정 목록에서 여행을 뺀다 (서버 방은 건드리지 않는다) */
+  function forgetLocal(code, tripId) {
+    var up = String(code || '').toUpperCase();
+    state.trips = state.trips.filter(function (t) {
+      return t.id !== tripId && !(up && String(t.remoteCode || '').toUpperCase() === up);
+    });
+    if (state.currentTripId === tripId) state.currentTripId = null;
+    try { if (TL.Account && TL.Account.forget) TL.Account.forget(code); } catch (e) {}
+    notify();
+  }
 
   var META_FIELDS = ['name', 'destination', 'startDate', 'endDate', 'baseCurrency', 'members', 'rates'];
   /** 메타 문서에 실어 보낼 값. keys를 주면 그 항목만 담는다(merge 쓰기라 나머지 필드는 그대로 남는다). */  function metaPayload(trip, keys) {
@@ -887,18 +908,31 @@
         }
 
         conn.unsubs.push(fsMod.onSnapshot(metaRef, function (snap) {
-          if (!snap.exists()) {
-            if (!opts.create) {
-              var e = new Error('초대 코드 ' + code + '에 해당하는 여행을 찾을 수 없습니다.');
-              tlStateError('notfound');
+          /* 방 문서가 없거나 폭파 표시(deleted)면 열지 않는다.
+             초대 코드로 새 문서를 만들지도, 기기에 남은 사본을 살리지도 않는다. */
+          var exists = snap.exists();
+          var metaData = exists ? (snap.data() || {}) : null;
+          var destroyed = !exists || !!(metaData && metaData.deleted === true);
+          var cached = !!(snap.metadata && snap.metadata.fromCache);
+          if (destroyed) {
+            // 새 방을 만드는 중이면 우리가 곧 이 문서를 덮어쓴다
+            if (opts.create) { done(); return; }
+            // 오프라인 캐시에 없다는 것만으로는 폭파됐다고 단정하지 않는다 (서버 확인을 기다린다)
+            if (!exists && cached) return;
+            tlStateError('notfound');
+            if (settled) {
+              // 보는 도중에 방장이 방을 폭파했다 — 이 기기에서도 치우고 화면을 돌린다
               closeConn();
-              done(e);
-            } else {
-              done();
+              roomGone(code, trip.id);
+              return;
             }
+            var e = new Error(GONE_MESSAGE);
+            e.code = 'notfound';
+            closeConn();
+            done(e);
             return;
           }
-          Store.setFromCache(!!(snap.metadata && snap.metadata.fromCache));
+          Store.setFromCache(cached);
           var m = snap.data() || {};
           trip.name = m.name || trip.name;
           trip.destination = m.destination || trip.destination;
@@ -1114,6 +1148,59 @@
   };
 
   /* ----------------------------------------------------- join / create */
+  /** 방을 서버에서 완전히 없앤다 (방장이 여행을 삭제할 때)
+      · 먼저 폭파 표시(deleted:true)를 남겨, 항목을 지우는 사이에도 초대 링크가 열리지 않게 한다
+      · 이 기기가 아는 항목 문서를 지우고, 마지막에 방 문서를 지운다
+      · 실패하면 기기 목록은 그대로 두어 다시 시도할 수 있게 한다 (성공한 척하지 않는다) */
+  Store.destroyTrip = function (tripId) {
+    var trip = Store.trip(tripId);
+    if (!trip) return Promise.reject(new Error('여행을 찾을 수 없습니다.'));
+    if (!Store.canWrite()) {
+      denyLogin();
+      return Promise.reject(Object.assign(new Error('로그인이 필요해요'), { code: 'need-login' }));
+    }
+    var code = String(trip.remoteCode || trip.inviteCode || '').trim().toUpperCase();
+    if (!code) {   // 이 기기에만 있는 여행 — 서버에 지울 방이 없다
+      Store.removeTrip(tripId);
+      return Promise.resolve({ code: '', local: true });
+    }
+    // 방장만 방을 폭파할 수 있다 (일행은 목록에서 빼는 것만 가능)
+    if (trip.ownerUid && !Core.canManageMembers(trip, currentUser())) {
+      return Promise.reject(Object.assign(new Error('방장만 방을 삭제할 수 있어요'), { code: 'notowner' }));
+    }
+    var items = [];
+    COLLS.forEach(function (coll) {
+      (trip.data[coll] || []).forEach(function (it) { if (it && it.id) items.push([coll, String(it.id)]); });
+    });
+    closeConn();   // 폭파 표시가 내 구독으로 되돌아오지 않게 먼저 끊는다
+    return Promise.resolve().then(function () { return loadFb(); }).then(function (fsMod) {
+      var metaRef = fsMod.doc(db, 'trips', code);
+      var acct = currentUser();
+      return fsMod.setDoc(metaRef, {
+        deleted: true,
+        deletedAt: new Date().toISOString(),
+        deletedBy: (acct && acct.uid) || ''
+      }, { merge: true }).then(function () {
+        // 항목 문서는 하나씩 지운다 (실패해도 방 폭파는 계속한다)
+        var chain = Promise.resolve();
+        items.forEach(function (pair) {
+          chain = chain.then(function () {
+            return fsMod.deleteDoc(fsMod.doc(db, 'trips', code, pair[0], pair[1])).catch(function () {});
+          });
+        });
+        return chain;
+      }).then(function () {
+        return fsMod.deleteDoc(metaRef);   // 방 문서까지 지우면 초대 코드는 완전히 끝난다
+      });
+    }).then(function () {
+      forgetLocal(code, tripId);
+      return { code: code };
+    }, function (e) {
+      reportError(e);
+      throw e;
+    });
+  };
+
   /** 초대 코드로 참여: 로컬에 여행 자리를 만들고 구독한다. opts.silent면 화면 전환·닉네임 변경 없이 목록에만 더한다. */
   Store.joinByCode = function (code, nickname, opts) {
     opts = opts || {};
@@ -1158,7 +1245,14 @@
       notify();
       return trip;
     }).catch(function (e) {
-      if (!existing) {
+      var dead = !!(e && e.code === 'notfound');
+      if (dead) {
+        /* 서버가 '없거나 폭파된 방'이라고 확인했다 — 기기에 캐시로 남아 있던 이 방도 함께 지운다 */
+        state.trips = state.trips.filter(function (t) { return t.id !== trip.id && t !== existing; });
+        if (state.currentTripId === trip.id) state.currentTripId = (prevCurrent === trip.id ? null : prevCurrent);
+        if (state.meByTrip) delete state.meByTrip[trip.id];
+        try { if (TL.Account && TL.Account.forget) TL.Account.forget(code); } catch (x) {}
+      } else if (!existing) {
         state.trips = state.trips.filter(function (t) { return t.id !== trip.id; });
         state.currentTripId = prevCurrent;
       } else if (prevData) {

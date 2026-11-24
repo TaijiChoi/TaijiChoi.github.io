@@ -750,6 +750,13 @@ body.dragging{user-select:none;-webkit-user-select:none}
   background:#FFF7ED;border:1px solid #FDE2C3;color:#8A4B0C;font-size:12.5px;line-height:1.5}
 .lock-note svg{flex:none;margin-top:1px}
 .lock-note b{color:#7A3F05}
+.danger-box{padding:2px 0 6px}
+.danger-head{display:flex;align-items:center;gap:8px;font-size:15.5px;color:var(--ink);letter-spacing:-.3px;margin-bottom:10px}
+.danger-head svg{flex:none;color:var(--danger)}
+.danger-lead{margin:0 0 10px;font-size:13.5px;line-height:1.6;font-weight:650;color:#B91C1C;
+  background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:11px 12px}
+.danger-list{margin:0;padding-left:18px;font-size:12.5px;line-height:1.7;color:var(--sub)}
+.danger-list li::marker{color:var(--danger)}
 .login-note{margin-bottom:14px;padding:14px}
 .login-note .ln-head{display:flex;align-items:center;gap:7px;font-size:14px;color:var(--ink);margin-bottom:5px}
 .login-note .ln-head svg{color:var(--blue-d)}

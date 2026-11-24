@@ -134,14 +134,75 @@
     UI.toast(moved ? '저장했어요 · 사라진 날의 ' + moved + '개 항목을 마지막 날로 옮겼어요' : '저장했어요', moved ? 3200 : 2200);
   };
 
+  /* ======================================================== 여행 삭제
+     방장이 공유 방을 지우면 되돌릴 수 없다 — 확인 단계에서 분명히 알리고,
+     확인을 눌렀을 때만 서버의 방까지 폭파한다. */
+  var danger = { trip: null, mode: '' };
+
+  /** 이 여행의 방장인가 (예전 방은 방장 기록이 없어 만든 사람으로 본다) */
+  function isRoomOwner(trip) {
+    if (!trip) return false;
+    try { if (Core.canManageMembers(trip, Store.currentUser())) return true; } catch (e) {}
+    return !trip.ownerUid && !(trip.members || []).some(function (m) { return m.uid || m.email; });
+  }
+
   A['delete-trip'] = function () {
     var trip = tripOf() || TL.App.currentTrip();
     if (!trip) return;
-    if (!confirm('"' + trip.name + '" 여행을 이 기기에서 삭제할까요?\n(실시간 공유 중이면 다른 일행의 데이터는 그대로 남습니다)')) return;
-    Store.removeTrip(trip.id);
+    var shared = !!trip.remoteCode;
+    danger.trip = trip;
+    danger.mode = shared ? (isRoomOwner(trip) ? 'destroy' : 'leave') : 'local';
+    var html = '';
+    if (danger.mode === 'destroy') {
+      html += '<div class="danger-box">' +
+        '<div class="danger-head">' + UI.icon('close', 18) + '<b>' + UI.esc(trip.name) + ' 방을 삭제할까요?</b></div>' +
+        '<p class="danger-lead">삭제하면 방이 완전히 사라지며 복구할 수 없어요. 일행들의 초대 링크도 더 이상 사용할 수 없게 됩니다.</p>' +
+        '<ul class="danger-list">' +
+          '<li>이 방의 일정·지출·준비물·예약이 모두 사라져요</li>' +
+          '<li>일행 화면에서도 이 여행이 사라져요</li>' +
+          '<li>초대코드 ' + UI.esc(String(trip.remoteCode)) + ' 로는 다시 들어올 수 없어요</li>' +
+        '</ul></div>';
+      html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">취소</button>' +
+        '<button class="btn btn-danger" data-action="delete-trip-confirm">완전히 삭제</button></div>';
+    } else if (danger.mode === 'leave') {
+      html += '<div class="danger-box">' +
+        '<div class="danger-head">' + UI.icon('close', 18) + '<b>' + UI.esc(trip.name) + ' 여행을 목록에서 뺄까요?</b></div>' +
+        '<p class="danger-lead">이 기기 목록에서만 빠지고, 방장과 일행들의 방·데이터는 그대로 남아요.</p>' +
+        '<p class="hintline">초대 링크(' + UI.esc(String(trip.remoteCode)) + ')로 다시 들어올 수는 있어요.</p></div>';
+      html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">취소</button>' +
+        '<button class="btn btn-danger" data-action="delete-trip-confirm">목록에서 빼기</button></div>';
+    } else {
+      html += '<div class="danger-box">' +
+        '<div class="danger-head">' + UI.icon('close', 18) + '<b>' + UI.esc(trip.name) + ' 여행을 삭제할까요?</b></div>' +
+        '<p class="danger-lead">이 기기에만 있는 여행이에요. 삭제하면 되돌릴 수 없어요.</p></div>';
+      html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">취소</button>' +
+        '<button class="btn btn-danger" data-action="delete-trip-confirm">삭제</button></div>';
+    }
+    open(html, danger.mode === 'destroy' ? '방 삭제' : '여행 삭제');
+  };
+
+  A['delete-trip-confirm'] = function () {
+    var ref = danger.trip;
+    var mode = danger.mode || 'local';
+    danger = { trip: null, mode: '' };
+    var trip = ref ? Store.trip(ref.id) : null;
+    if (!trip) { UI.close(); return; }
+    if (mode !== 'destroy') {
+      Store.removeTrip(trip.id);
+      UI.close();
+      TL.App.goHome();
+      UI.toast(mode === 'leave' ? '목록에서 뺐어요 · 일행들의 방은 그대로예요' : '삭제했어요');
+      return;
+    }
     UI.close();
     TL.App.goHome();
-    UI.toast('삭제했어요');
+    UI.toast('방을 삭제하는 중…', 4000);
+    Store.destroyTrip(trip.id).then(function () {
+      UI.toast('방을 완전히 삭제했어요 · 초대 링크도 더 이상 쓸 수 없어요', 4000);
+    }, function (e) {
+      if (e && e.code === 'need-login') { UI.requireLogin('로그인하면 여행을 삭제할 수 있어요'); return; }
+      UI.toast('방을 삭제하지 못했어요 · 네트워크를 확인하고 다시 시도해 주세요', 4000);
+    });
   };
 
   A['add-member-chip'] = function () {
