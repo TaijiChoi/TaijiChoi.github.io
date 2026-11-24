@@ -318,9 +318,13 @@
     ok(qa('.seg-row.road').length >= 1, '데스크톱: 구간이 도로 기준', qa('.seg-row.road').length);
     ok(text('.seg-row').indexOf('차 약') >= 0, '데스크톱: 구간 차량 시간', text('.seg-row').slice(0, 60));
     var dpins = qa('#route-map .rt-icon .rt-pin');
-    ok(dpins.length === 3, '데스크톱: 핀 3개', dpins.length);
-    ok(/0E8F87/i.test(dpins[0].getAttribute('style') || ''), '데스크톱: 핀1 교통=청록', dpins[0].getAttribute('style'));
-    ok(/2F6BFF/i.test(dpins[1].getAttribute('style') || ''), '데스크톱: 핀2 관광=파랑', dpins[1].getAttribute('style'));
+    var geoCount = w.eval('TL.Core.sortedSchedules(TL.Store.trip("' + tid + '").data, "d1").filter(TL.Core.hasGeo).length');
+    ok(dpins.length === geoCount && dpins.length >= 3, '데스크톱: 좌표 일정 수만큼 핀', dpins.length + '/' + geoCount);
+    ok(dpins.map(function (p) { return p.textContent.trim(); }).join('') === dpins.map(function (p, i) { return String(i + 1); }).join(''), '데스크톱: 핀 번호 1부터 차례로', dpins.map(function (p) { return p.textContent.trim(); }).join(''));
+    var dpinStyle = dpins.map(function (p) { return String(p.getAttribute('style') || '').toLowerCase(); });
+    ok(dpinStyle.some(function (c) { return c.indexOf('#0e8f87') >= 0; }) && dpinStyle.some(function (c) { return c.indexOf('#2f6bff') >= 0; }),
+      '데스크톱: 교통=청록·관광=파랑 핀', dpinStyle.join(' '));
+    ok(dpinStyle.every(function (c) { return /background:#[0-9a-f]{6}/.test(c); }), '데스크톱: 핀마다 카테고리 색', dpinStyle.join(' '));
     ok(qa('.cat-legend .cl-item').length >= 2, '데스크톱: 카테고리 색 범례', qa('.cat-legend .cl-item').length);
     ok(qa('#route-map path').length >= 2, '데스크톱: 도로 폴리라인', qa('#route-map path').length);
     ok(!!q('a.map-all') && !!q('.seg-links a.tl-map.kakao'), '데스크톱: 전체 동선·카카오 길찾기 유지');
