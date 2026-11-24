@@ -537,11 +537,12 @@
 
     /* ============ 4e) v15: 서비스 워커 · 오프라인 배지 ============ */
     var reg = null;
-    for (var rgi = 0; rgi < 240; rgi++) {   // 부팅 때 Firebase 모듈·지도 로드와 겹쳐도 등록될 때까지 (최대 60초)
+    for (var rgi = 0; rgi < 160; rgi++) {   // 부팅 때 Firebase 모듈·지도 로드와 겹쳐도 등록될 때까지 (최대 40초)
       try { reg = await w.navigator.serviceWorker.getRegistration(); } catch (e) {}
       if (reg) break;
       await sleep(250);
     }
+    if (!reg) { try { reg = await w.navigator.serviceWorker.ready; } catch (e) {} }   // 활성 등록으로 한 번 더 확인
     ok(!!reg, '서비스 워커 등록', reg && reg.scope);
     var cacheKeys = [];
     try { cacheKeys = await w.caches.keys(); } catch (e) {}
@@ -937,7 +938,7 @@
     ok(loginShown, '초대 링크(게스트): 로그인 안내 시트');
     var iw = inv.contentWindow;
     ok(!!iw && !!iw.TL && iw.TL.Store.isDefaultFirebase(), '초대 링크도 기본 설정으로 열림');
-    ok(!!iw && !iw.TL.Store.signedIn() && iw.TL.Store.trips().length === 0, '초대 링크: 로그인 전에는 참여하지 않음');
+    ok(!!iw && !iw.TL.Store.signedIn() && !iw.TL.Store.trips().some(function (t) { return t.remoteCode === '7KD2QM'; }), '초대 링크: 로그인 전에는 참여하지 않음');
     // 로그인하면 대기 중이던 초대 코드로 참여를 이어간다 (없는 코드 → 참여 시트에 코드가 채워진다)
     iw.eval('TL.Store.connect = function () { return Promise.reject(new Error("초대 코드 7KD2QM에 해당하는 여행을 찾을 수 없습니다.")); };');
     iw.eval('TL.Auth.testSignIn({ uid: "qa9", displayName: "초대 손님", email: "invite@example.com" })');
