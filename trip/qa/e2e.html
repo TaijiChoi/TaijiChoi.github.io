@@ -740,6 +740,8 @@
       '  deleteDoc: function (ref) { delete __qaDb.docs[ref.path]; __qaFire(ref.path); return Promise.resolve(); },',
       '  getDoc: function (ref) { return Promise.resolve({ exists: function () { return !!__qaDb.docs[ref.path]; }, data: function () { return __qaDb.docs[ref.path]; } }); }',
       '};',
+      'globalThis.__qaStubConnect = TL.Store.connect;',
+      'TL.Store.connect = __realConnect;            // 가짜 방 대신 진짜 연결(모의 Firestore)로 검사한다',
       'TL.Store.clearAll();',
       'TL.Store.testInjectRemote(__qaFs, {});',
       'TL.Auth.testSignIn({ uid: "qa1", displayName: "테스트 재원", email: "qa@example.com" });',
@@ -782,7 +784,7 @@
     await sleep(200);
     ok(w.eval('TL.Store.trip(__rTrip.id).data.schedules.length') === 2, '지운 뒤 늦은 스냅샷도 무시', w.eval('TL.Store.trip(__rTrip.id).data.schedules.length'));
     ok(w.document.body.textContent.indexOf('지울 일정') < 0, '지운 뒤 늦은 스냅샷: 화면도 그대로');
-    w.eval('TL.Store.disconnect(); TL.Store.testInjectRemote(null, null);');
+    w.eval('TL.Store.disconnect(); TL.Store.testInjectRemote(null, null); TL.Store.connect = __qaStubConnect;');
 
     /* ===== 게스트 차단 → 현재 창 Google 로그인으로 복귀 ===== */
     if (q('[data-action="go-home"]')) await clickSel('[data-action="go-home"]');
@@ -864,6 +866,8 @@
     ok(w.eval("(__qaIOState.docs['users/qa1/trips/QA1234']||{}).role") === 'owner', '계정 문서에 역할(방장) 기록', w.eval("(__qaIOState.docs['users/qa1/trips/QA1234']||{}).role"));
 
     // 로그인 직후 병합 안내 (이 기기에만 있는 여행)
+    w.eval('var lt = TL.Store.createTrip({ name: "로컬 전용 QA", startDate: "2026-12-18", endDate: "2026-12-19" }); delete lt.remoteCode; delete lt.inviteCode; lt.createdHere = true; TL.Store.notify();');
+    await sleep(150);
     w.eval('TL.Dialogs.merge()');
     await sleep(150);
     ok(!!q('[data-action="acct-merge"]'), '로컬 여행 병합 안내');
