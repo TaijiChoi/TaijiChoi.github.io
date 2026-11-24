@@ -155,8 +155,7 @@
     var html = '';
     if (danger.mode === 'destroy') {
       html += '<div class="danger-box">' +
-        '<div class="danger-head">' + UI.icon('close', 18) + '<b>방을 삭제할까요?</b></div>' +
-        '<p class="danger-name">' + UI.esc(trip.name) + '</p>' +
+        '<div class="danger-head">' + UI.icon('close', 18) + '<b>' + UI.esc(trip.name) + ' 방을 삭제할까요?</b></div>' +
         '<p class="danger-lead">삭제하면 방이 완전히 사라지며 복구할 수 없어요. 일행들의 초대 링크도 더 이상 사용할 수 없게 됩니다.</p>' +
         '<ul class="danger-list">' +
           '<li>이 방의 일정·지출·준비물·예약이 모두 사라져요</li>' +
@@ -167,16 +166,14 @@
         '<button class="btn btn-danger" data-action="delete-trip-confirm">완전히 삭제</button></div>';
     } else if (danger.mode === 'leave') {
       html += '<div class="danger-box">' +
-        '<div class="danger-head">' + UI.icon('close', 18) + '<b>여행을 목록에서 뺄까요?</b></div>' +
-        '<p class="danger-name">' + UI.esc(trip.name) + '</p>' +
+        '<div class="danger-head">' + UI.icon('close', 18) + '<b>' + UI.esc(trip.name) + ' 여행을 목록에서 뺄까요?</b></div>' +
         '<p class="danger-lead">이 기기 목록에서만 빠지고, 방장과 일행들의 방·데이터는 그대로 남아요.</p>' +
         '<p class="hintline">초대 링크(' + UI.esc(String(trip.remoteCode)) + ')로 다시 들어올 수는 있어요.</p></div>';
       html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">취소</button>' +
         '<button class="btn btn-danger" data-action="delete-trip-confirm">목록에서 빼기</button></div>';
     } else {
       html += '<div class="danger-box">' +
-        '<div class="danger-head">' + UI.icon('close', 18) + '<b>여행을 삭제할까요?</b></div>' +
-        '<p class="danger-name">' + UI.esc(trip.name) + '</p>' +
+        '<div class="danger-head">' + UI.icon('close', 18) + '<b>' + UI.esc(trip.name) + ' 여행을 삭제할까요?</b></div>' +
         '<p class="danger-lead">이 기기에만 있는 여행이에요. 삭제하면 되돌릴 수 없어요.</p></div>';
       html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">취소</button>' +
         '<button class="btn btn-danger" data-action="delete-trip-confirm">삭제</button></div>';
