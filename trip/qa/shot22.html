@@ -55,8 +55,18 @@
     window.__tripId = t.id;
     return t.id;
   }
+  function emojiFont() {
+    var win = w(), doc = win.document;
+    if (doc.getElementById('shot-emoji-font')) return;
+    var st = doc.createElement('style');
+    st.id = 'shot-emoji-font';
+    st.textContent = "@import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji');" +
+      "body,button,input,textarea{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Noto Sans KR',Roboto,'Noto Color Emoji',sans-serif !important}";
+    doc.head.appendChild(st);
+  }
   async function ensureSignIn() {
     var win = w();
+    emojiFont();
     await sleep(700);
     if (!win.TL.Auth.signedIn()) {
       win.TL.Auth.testSignIn({ uid: 'shot22', displayName: '재원', email: 'shot22@example.com' });
