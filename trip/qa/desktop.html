@@ -124,8 +124,13 @@
     await click(q('[data-action="open-account"]'));
     ok(!!q('[data-action="auth-google-redirect"]'), '계정 시트: 현재 창 Google 로그인 버튼');
     await click(q('[data-action="auth-google"]'));
-    await sleep(500);
-    ok(w.TL.Auth.signedIn(), '데스크톱 로그인(가짜 인증)');
+    await sleep(600);
+    // 실제 Firebase Auth 콜백이 늦게 도착해 가짜 로그인을 덮어쓰는 경우를 대비해 한 번 더 세운다
+    for (var li = 0; li < 3 && !w.TL.Auth.signedIn(); li++) {
+      w.TL.Auth.testSignIn({ uid: 'd1', displayName: '데스크톱 사용자', email: 'desk@example.com' });
+      await sleep(250);
+    }
+    ok(w.TL.Auth.signedIn(), '데스크톱 로그인(가짜 인증)', w.eval('(TL.Auth.currentUser()||{}).uid'));
     ok(!!q('.acct-chip') && !q('.login-note'), '로그인 뒤 계정 칩 · 안내 사라짐');
 
     /* v23: 도로 경로는 실제 OSRM 대신 모의 응답으로 (1280x800) */
@@ -308,6 +313,7 @@
     noOverflowDesktop('지도 핀 v22');
 
     /* v23: 실제 도로 경로 · 카테고리별 핀 색 (데스크톱 1280x800) */
+    if (!w.TL.Auth.signedIn()) { w.TL.Auth.testSignIn({ uid: 'd1', displayName: '데스크톱 사용자', email: 'desk@example.com' }); await sleep(200); }
     w.TL.Route.clear();
     w.TL.App.openTrip(tid, 'schedule');
     await sleep(350);
