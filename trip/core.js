@@ -565,6 +565,128 @@
     };
   };
 
+  /* ------------------------------------------- v23: 실제 자동차 도로 경로 (OSRM)
+     직선거리 대신 공개 라우팅 API(OSRM)의 자동차 경로·거리·시간을 쓴다.
+     · 요청: 한 번에 경유지 10곳(구간 9개)까지, 넘으면 나눠 부른다
+     · 실패(오프라인·해상 구간·응답 없음)하면 부르는 쪽이 직선 추정으로 폴백한다 */
+  Core.OSRM_BASE = 'https://router.project-osrm.org/route/v1/driving/';
+  Core.OSRM_MAX_POINTS = 10;
+  Core.OSRM_TIMEOUT = 8000;
+  /** 좌표 하나를 OSRM 표기(lng,lat)로 — 소수 6자리면 10cm 수준 */
+  Core.osrmCoord = function (p) {
+    if (!Core.hasGeo(p)) return '';
+    var la = Math.round(Number(p.lat) * 1e6) / 1e6;
+    var ln = Math.round(Number(p.lng) * 1e6) / 1e6;
+    return ln + ',' + la;
+  };
+  /** 좌표 일정들 → OSRM 경로 요청 URL (2곳 미만이면 '') */
+  Core.osrmUrl = function (items) {
+    var pts = (items || []).filter(Core.hasGeo).map(Core.osrmCoord).filter(Boolean);
+    if (pts.length < 2) return '';
+    return Core.OSRM_BASE + pts.join(';') +
+      '?overview=full&geometries=geojson&steps=false&alternatives=false&annotations=false';
+  };
+  /** 폴리라인 좌표가 너무 많으면 화면에 그릴 수 있게 솎아 낸다(처음·끝은 남긴다) */
+  Core.thinPath = function (path, max) {
+    var list = (path || []).filter(function (p) { return Array.isArray(p) && p.length >= 2; });
+    var limit = Number(max) || 400;
+    if (list.length <= limit) return list;
+    var step = list.length / limit;
+    var out = [];
+    for (var i = 0; i < limit; i++) out.push(list[Math.round(i * step)]);
+    if (out[out.length - 1] !== list[list.length - 1]) out.push(list[list.length - 1]);
+    return out;
+  };
+  /** OSRM 응답 → { ok, reason, km, min, legs:[{km,min}], path:[[lat,lng],...] }
+      · legCount를 주면 구간 수가 맞는지도 본다(다르면 legs에 담되 ok는 유지) */
+  Core.parseOsrm = function (json, legCount) {
+    var out = { ok: false, reason: '', km: 0, min: 0, legs: [], path: [], legCount: 0 };
+    if (!json || typeof json !== 'object') { out.reason = 'no-data'; return out; }
+    if (json.code && json.code !== 'Ok') { out.reason = String(json.code); return out; }
+    var route = (json.routes && json.routes[0]) || null;
+    var dist = Number(route && route.distance), dur = Number(route && route.duration);
+    if (!route || !isFinite(dist) || !isFinite(dur) || !(dist > 0)) { out.reason = 'no-route'; return out; }
+    out.legs = (route.legs || []).map(function (l) {
+      var d = Number(l && l.distance), t = Number(l && l.duration);
+      if (!isFinite(d) || d < 0) d = 0;
+      if (!isFinite(t) || t < 0) t = 0;
+      return { km: Math.round(d / 10) / 100, min: t > 0 ? Math.max(1, Math.round(t / 60)) : 0 };
+    });
+    out.legCount = out.legs.length;
+    var g = route.geometry;   // GeoJSON: coordinates = [[lng,lat],...]
+    if (g && Array.isArray(g.coordinates)) {
+      out.path = Core.thinPath(g.coordinates.map(function (c) {
+        if (!Array.isArray(c) || c.length < 2) return null;
+        var lng = Number(c[0]), lat = Number(c[1]);
+        if (!isFinite(lat) || !isFinite(lng)) return null;
+        return [lat, lng];
+      }).filter(Boolean), 400);
+    }
+    out.ok = true;
+    out.km = Math.round(dist / 10) / 100;
+    out.min = dur > 0 ? Math.max(1, Math.round(dur / 60)) : 0;
+    if (typeof legCount === 'number' && legCount > 0 && out.legs.length && out.legs.length !== legCount) {
+      out.reason = 'leg-mismatch';
+    }
+    return out;
+  };
+  /** 구간들을 도로 경로 결과로 채운다. 도로 구간이 없는 곳은 직선 추정을 그대로 남긴다. */
+  Core.routeSegments = function (items, route) {
+    var base = Core.segments(items);
+    if (!route || !route.ok) return base;
+    return base.map(function (s, i) {
+      var leg = route.legs && route.legs[i];
+      if (!leg || !(leg.km > 0)) return s;
+      return {
+        fromId: s.fromId, toId: s.toId, fromTitle: s.fromTitle, toTitle: s.toTitle,
+        from: s.from, to: s.to,
+        km: leg.km, min: leg.min, road: true,
+        straightKm: s.km, walkMin: s.walkMin, carMin: s.carMin
+      };
+    });
+  };
+  /** 동선 요약: { segs, km, min, roadCount, straightCount, allRoad, anyRoad } */
+  Core.routeSummary = function (items, route) {
+    var segs = Core.routeSegments(items, route);
+    var out = { segs: segs, km: 0, min: 0, roadCount: 0, straightCount: 0, allRoad: false, anyRoad: false };
+    segs.forEach(function (s) {
+      if (s.road) { out.roadCount++; out.km += s.km; out.min += s.min; }
+      else { out.straightCount++; out.km += s.km; out.min += s.carMin; }
+    });
+    out.anyRoad = out.roadCount > 0;
+    out.allRoad = segs.length > 0 && out.straightCount === 0;
+    out.km = Math.round(out.km * 100) / 100;
+    return out;
+  };
+
+  /* ---------------------------------------- v23: 카테고리별 핀 색
+     지도 번호 핀과 타임라인 배지가 같은 색을 쓴다(한눈에 같은 카테고리로 읽히게).
+     숫자 1,2,3은 흰 글씨 + 흰 테두리라 어두운 배경에서도 읽힌다. */
+  Core.CAT_COLORS = {
+    sight: '#2F6BFF',      // 관광 — 파랑
+    food: '#F2680C',       // 식당 — 주황
+    cafe: '#8A5A2B',       // 카페 — 브라운
+    stay: '#6B4EFF',       // 숙소 — 보라
+    transport: '#0E8F87',  // 교통·이동 — 청록
+    shop: '#F63F7D',       // 쇼핑 — 분홍
+    etc: '#5B6B8C'         // 기타 — 남색/회색
+  };
+  Core.catColor = function (key) {
+    var k = String(key == null ? '' : key);
+    return Object.prototype.hasOwnProperty.call(Core.CAT_COLORS, k) ? Core.CAT_COLORS[k] : Core.CAT_COLORS.etc;
+  };
+  /** 동선에 나온 카테고리만 색 범례 순서대로: [{key,label,color,count}] */
+  Core.catLegend = function (items) {
+    var seen = {};
+    (items || []).forEach(function (it) {
+      var k = Core.schedCat(it && it.category).key;
+      seen[k] = (seen[k] || 0) + 1;
+    });
+    return Core.SCHED_CATS.filter(function (c) { return seen[c.key]; }).map(function (c) {
+      return { key: c.key, label: c.label, color: Core.catColor(c.key), count: seen[c.key] };
+    });
+  };
+
   /* ------------------------------------------------- 지도 타일 소스 (v17) */
   /** 동선 지도에 쓸 타일 소스. 알 수 없는 값은 구글지도로 본다. */
   Core.MAP_SOURCES = {
@@ -1199,6 +1321,29 @@
     var me = whoOf(user);
     if (!me.uid) return false;
     return String(trip.ownerUid || '') === me.uid;
+  };
+  /** 이 방을 완전히 폭파할 수 있는가 (방장만)
+      · ownerUid가 있으면 그 계정만
+      · v20 이전 방(ownerUid 없음)은 계정이 연결된 일행이 있으면 그 사람을 방장으로 본다
+      · 방장·계정 기록이 아예 없는 예전 방은 만든 사람으로 보고 허용한다 */
+  Core.canDestroyRoom = function (trip, user) {
+    if (!trip || trip.sample) return false;
+    var me = whoOf(user);
+    if (!me.uid && !me.email) return false;
+    if (trip.ownerUid) return !!me.uid && String(trip.ownerUid) === me.uid;
+    var linked = (trip.members || []).filter(function (m) { return m && (m.uid || m.email); });
+    if (linked.length) return linked.some(function (m) { return Core.memberMatches(m, me); });
+    return true;
+  };
+  /** 이름·만든 시각·일행이 하나도 없는 껍데기 방 문서인가
+      (폭파된 방에 남은 기기가 늦게 쓴 병합 쓰기가 되살린 문서를 걸러 낸다) */
+  Core.isOrphanRoom = function (m) {
+    if (!m || typeof m !== 'object') return true;
+    if (m.deleted === true) return true;
+    if (m.name || m.destination) return false;
+    if (m.createdAt) return false;
+    if (Array.isArray(m.members) && m.members.length) return false;
+    return true;
   };
   /** 일행 한 명을 고칠 수 있는가: 방장은 모두, 그 외에는 자기 자신만 */
   Core.canEditMember = function (trip, member, user) {

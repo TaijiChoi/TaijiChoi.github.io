@@ -53,20 +53,23 @@
     } catch (e) {}
   }
 
-  /** 렌더 뒤에 호출: #route-map이 있으면 그 날의 좌표 일정을 그린다 (source = 'google' | 'osm') */
-  M.paint = function (trip, day, source) {
+  /** 렌더 뒤에 호출: #route-map이 있으면 그 날의 좌표 일정을 그린다 (source = 'google' | 'osm')
+      route: v23 OSRM 도로 경로 결과(있으면 실제 도로 폴리라인, 없으면 직선 점선) */
+  M.paint = function (trip, day, source, route) {
     var el = document.getElementById('route-map');
     if (!trip || !el) { M.hide(); return; }
     var items = Core.sortedSchedules(trip.data, day).filter(Core.hasGeo);
     if (!items.length) { M.hide(); return; }
     var src = Core.mapSource(source);
-    if (map && mapEl === el && el.getAttribute('data-src') === src.key) {
+    var routeSig = (route && route.ok && route.path ? 'road:' + route.path.length + '@' + Math.round(route.km * 100) : 'direct');
+    if (map && mapEl === el && el.getAttribute('data-src') === src.key && el.getAttribute('data-route') === routeSig) {
       try { map.invalidateSize(); } catch (e) {}
       return;
     }
     M.hide();
     var myPaint = ++paintedAt;
     el.setAttribute('data-src', src.key);
+    el.setAttribute('data-route', routeSig);
     M.ensure().then(function (L) {
       if (myPaint !== paintedAt) return;
       if (document.getElementById('route-map') !== el) return;
@@ -106,19 +109,32 @@
 
       var pts = [];
       items.forEach(function (it, i) {
-        var icon = L.divIcon({ className: 'rt-icon', html: '<span>' + (i + 1) + '</span>', iconSize: [28, 28], iconAnchor: [14, 14] });
+        // v23: 카테고리별로 핀 색을 다르게 (숫자는 흰 글씨 + 흰 테두리라 그대로 읽힌다)
+        var color = Core.catColor(it.category);
+        var icon = L.divIcon({
+          className: 'rt-icon',
+          html: '<span class="rt-pin" style="background:' + color + '" data-cat="' + Core.esc(Core.schedCat(it.category).key) + '">' + (i + 1) + '</span>',
+          iconSize: [28, 28], iconAnchor: [14, 14]
+        });
         L.marker([Number(it.lat), Number(it.lng)], { icon: icon, title: it.title }).addTo(m)
           .bindPopup('<b>' + (i + 1) + '. ' + Core.esc(it.title) + '</b>' +
-            (it.placeName || it.place ? '<br>' + Core.esc(it.placeName || it.place) : ''));
+            (it.placeName || it.place ? '<br>' + Core.esc(it.placeName || it.place) : '') +
+            '<br><span style="color:' + color + ';font-weight:700">' + Core.esc(Core.schedCat(it.category).label) + '</span>');
         pts.push([Number(it.lat), Number(it.lng)]);
       });
-      if (pts.length > 1) {
+      var roadPath = (route && route.ok && route.path && route.path.length > 1) ? route.path : null;
+      if (roadPath) {
+        // 실제 자동차 도로 경로 (OSRM) — 진한 실선 + 직선 참고선은 옅은 점선
+        L.polyline(pts, { color: '#9AA6B8', weight: 2, opacity: .35, dashArray: '4 7' }).addTo(m);
+        L.polyline(roadPath, { color: '#1B6EF3', weight: 5, opacity: .92, lineJoin: 'round' }).addTo(m);
+      } else if (pts.length > 1) {
         L.polyline(pts, { color: '#368FFF', weight: 4, opacity: .85, dashArray: '7 7' }).addTo(m);
       }
       var fit = function () {
         try {
-          if (pts.length === 1) m.setView(pts[0], 15);
-          else m.fitBounds(L.latLngBounds(pts).pad(0.22), { maxZoom: 15 });
+          var box = roadPath && roadPath.length > 1 ? roadPath : pts;
+          if (box.length === 1) m.setView(box[0], 15);
+          else m.fitBounds(L.latLngBounds(box).pad(0.22), { maxZoom: 15 });
         } catch (e) {}
       };
       fit();
@@ -143,6 +159,121 @@
     if (!map) return;
     var note = document.querySelector('.map-offline');
     if (note) { note.style.display = 'none'; }
+  };
+
+  /* ============================== v23: OSRM 실제 자동차 도로 경로 (조회·캐시)
+     화면(일정 탭)이 좌표 일정 목록으로 상태를 읽고(state), 없으면 load()로 한 번 부른다.
+     · 같은 좌표 동선은 10분 캐시 → 다시 그려도 재요청하지 않는다
+     · 동시에 여러 번 불러도 fetch는 하나로 합친다(busy)
+     · 실패는 60초만 기억해 다음에 다시 시도한다(해상 구간·오프라인은 폴백 표시) */
+  var R = (TL.Route = {});
+  R.TTL = 10 * 60 * 1000;
+  R.FAIL_TTL = 60 * 1000;
+  R.TIMEOUT = 8000;
+  var routeCache = {};      // key → { at, route }
+  var routeBusy = {};       // key → Promise
+  var routeSubs = [];
+  var fetchImpl = null;     // 테스트용 대체 fetch
+
+  /** 동선이 바뀌었을 때(도로 경로 도착·실패) 앱이 화면을 다시 그릴 수 있게 알린다 */
+  R.onChange = function (cb) {
+    routeSubs.push(cb);
+    return function () { routeSubs = routeSubs.filter(function (f) { return f !== cb; }); };
+  };
+  function emit(ev) {
+    routeSubs.slice().forEach(function (cb) { try { cb(ev); } catch (e) {} });
+  }
+
+  /** 좌표 일정들로 만든 캐시 열쇠 (좌표가 같으면 여행·날짜가 달라도 같은 경로) */
+  R.key = function (items) {
+    var pts = (items || []).filter(Core.hasGeo).map(Core.osrmCoord).filter(Boolean);
+    return pts.length < 2 ? '' : pts.join('|');
+  };
+  R.cached = function (key) {
+    var c = key && routeCache[key];
+    if (!c) return null;
+    var ttl = c.route && c.route.ok ? R.TTL : R.FAIL_TTL;
+    if (Date.now() - c.at > ttl) return null;
+    return c.route;
+  };
+  /** 화면이 읽는 상태: none(2곳 미만) / idle(아직 안 부름) / loading / ok / fail */
+  R.state = function (items) {
+    var key = R.key(items);
+    if (!key) return { status: 'none', route: null, key: '' };
+    var hit = R.cached(key);
+    if (hit) return { status: hit.ok ? 'ok' : 'fail', route: hit, key: key };
+    if (routeBusy[key]) return { status: 'loading', route: null, key: key };
+    return { status: 'idle', route: null, key: key };
+  };
+  /** 테스트용 fetch 대체 (실제 네트워크 없이 응답을 흔들지 않고 검사) */
+  R.testSetFetcher = function (fn) { fetchImpl = fn || null; };
+  R.clear = function () { routeCache = {}; };
+
+  function fetchRoute(url) {
+    var ctrl = (typeof AbortController !== 'undefined' && AbortController) ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) { try { ctrl.abort(); } catch (e) {} } }, R.TIMEOUT);
+    var call = fetchImpl || (root.fetch ? function (u, o) { return root.fetch(u, o); } : null);
+    if (!call) return Promise.reject(new Error('네트워크를 쓸 수 없어요'));
+    return Promise.resolve(call(url, ctrl ? { signal: ctrl.signal } : {})).then(function (res) {
+      clearTimeout(timer);
+      if (!res) throw new Error('응답이 없어요');
+      if (res.ok === false) throw new Error('HTTP ' + res.status);
+      return typeof res.json === 'function' ? res.json() : res;
+    }, function (e) {
+      clearTimeout(timer);
+      throw e;
+    });
+  }
+
+  /** 한 번에 10곳씩 나눠 부르고, 구간·폴리라인을 이어 붙인다 */
+  function fetchChunks(pts) {
+    var chunks = [];
+    var step = Core.OSRM_MAX_POINTS;
+    for (var i = 0; i < pts.length - 1; i += step - 1) {
+      chunks.push(pts.slice(i, Math.min(i + step, pts.length)));
+      if (i + step >= pts.length) break;
+    }
+    return chunks.reduce(function (chain, part) {
+      return chain.then(function (acc) {
+        var url = Core.osrmUrl(part);
+        return fetchRoute(url).then(function (json) {
+          var one = Core.parseOsrm(json, part.length - 1);
+          if (!one.ok) throw new Error(one.reason || '경로를 찾지 못했어요');
+          if (!acc) return one;
+          acc.legs = acc.legs.concat(one.legs);
+          one.path.forEach(function (p, idx) { if (idx === 0 && acc.path.length) return; acc.path.push(p); });
+          acc.km = Math.round((acc.km + one.km) * 100) / 100;
+          acc.min = acc.min + one.min;
+          return acc;
+        });
+      });
+    }, Promise.resolve(null));
+  }
+
+  /** 도로 경로를 불러온다(캐시·중복 요청 합치기). 결과 { status, route, changed } */
+  R.load = function (items) {
+    var pts = (items || []).filter(Core.hasGeo);
+    if (pts.length < 2) return Promise.resolve({ status: 'none', changed: false });
+    if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) {
+      return Promise.resolve({ status: 'fail', reason: 'offline', changed: false });
+    }
+    var key = R.key(pts);
+    var hit = R.cached(key);
+    if (hit) return Promise.resolve({ status: hit.ok ? 'ok' : 'fail', route: hit, changed: false });
+    if (routeBusy[key]) return routeBusy[key];
+    routeBusy[key] = fetchChunks(pts).then(function (route) {
+      delete routeBusy[key];
+      routeCache[key] = { at: Date.now(), route: route };
+      emit({ key: key, status: 'ok', route: route });
+      return { status: 'ok', route: route, changed: true };
+    }, function (e) {
+      var fail = { ok: false, reason: (e && e.message) || 'network', km: 0, min: 0, legs: [], path: [] };
+      delete routeBusy[key];
+      routeCache[key] = { at: Date.now(), route: fail };
+      emit({ key: key, status: 'fail', route: fail });
+      return { status: 'fail', route: fail, changed: true };
+    });
+    return routeBusy[key];
   };
 
   /* --------------------------------- v22: 일정 시트의 위치 찍기 미니 지도 */

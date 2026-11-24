@@ -139,11 +139,11 @@
      확인을 눌렀을 때만 서버의 방까지 폭파한다. */
   var danger = { trip: null, mode: '' };
 
-  /** 이 여행의 방장인가 (예전 방은 방장 기록이 없어 만든 사람으로 본다) */
+  /** 이 여행의 방장인가 (예전 방은 계정이 연결된 일행이나 만든 사람으로 본다)
+      v23: Core.canDestroyRoom과 같은 기준을 쓴다 — 예전 방(HMHLXW 같은)도 방장이면 '완전히 삭제'할 수 있다 */
   function isRoomOwner(trip) {
     if (!trip) return false;
-    try { if (Core.canManageMembers(trip, Store.currentUser())) return true; } catch (e) {}
-    return !trip.ownerUid && !(trip.members || []).some(function (m) { return m.uid || m.email; });
+    try { return Core.canDestroyRoom(trip, Store.currentUser()); } catch (e) { return false; }
   }
 
   A['delete-trip'] = function () {

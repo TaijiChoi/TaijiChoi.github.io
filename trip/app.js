@@ -184,7 +184,18 @@
     if (TL.RouteMap) {
       if (v.screen === 'trip' && trip && v.tab === 'schedule') {
         var dayKey = v.day || Screens.defaultDay(trip);
-        requestAnimationFrame(function () { TL.RouteMap.paint(trip, dayKey, v.mapSource); });
+        var geoItems = Core.sortedSchedules(trip.data, dayKey).filter(Core.hasGeo);
+        var rstate = (TL.Route && TL.Route.state) ? TL.Route.state(geoItems) : { status: 'none', route: null };
+        requestAnimationFrame(function () { TL.RouteMap.paint(trip, dayKey, v.mapSource, rstate.route); });
+        // v23: 실제 도로 경로를 한 번 불러오고, 도착하면 그 날 화면만 다시 그린다
+        if (TL.Route && TL.Route.load && Core.segments(geoItems).length) {
+          TL.Route.load(geoItems).then(function (res) {
+            if (!res || !res.changed) return;
+            if (App.view.screen !== 'trip' || App.view.tripId !== trip.id || App.view.tab !== 'schedule') return;
+            if ((App.view.day || Screens.defaultDay(trip)) !== dayKey) return;
+            render();
+          });
+        }
       } else {
         TL.RouteMap.hide();
       }
@@ -414,8 +425,21 @@
     if (!('serviceWorker' in navigator)) return;
     var https = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     if (!https) return;
+    var autoTest = /[?&]qa=1/.test(location.search);   // 자동 테스트는 새로고침하지 않는다
+    var hadController = !!navigator.serviceWorker.controller;
+    var reloaded = false;
     try {
-      navigator.serviceWorker.register('./sw.js').catch(function (e) {
+      // 새 서비스 워커(v23)가 화면을 넘겨받으면 한 번 새로고침해 최신 앱을 쓴다 (v20 캐시에 갖혀 초대 링크 차단을 못 하는 일 방지)
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (!hadController || reloaded || autoTest) return;
+        reloaded = true;
+        location.reload();
+      });
+    } catch (e) {}
+    try {
+      navigator.serviceWorker.register('./sw.js').then(function (reg) {
+        if (reg && reg.update) { try { reg.update(); } catch (e) {} }
+      }).catch(function (e) {
         console.warn('[triplog] service worker', e);
       });
     } catch (e) { /* 사생활 보호 모드 등 */ }
@@ -448,6 +472,13 @@
       App.openTrip(t.id, 'schedule');
       cleanUrl();
       TL.Dialogs.maybeWhoAmI(Store.trip(t.id));
+      // v23: 예전 방(ownerUid 없음)을 다시 열었을 때 — 서버의 방까지 지우는 길을 알려 준다
+      var joined = Store.trip(t.id);
+      if (joined && joined.remoteCode && !joined.ownerUid && Core.canDestroyRoom(joined, Store.currentUser())) {
+        setTimeout(function () {
+          UI.toast('이 방은 아직 서버에 남아 있어요 · 여행 정보 › 삭제에서 완전히 삭제할 수 있어요', 4600);
+        }, 500);
+      }
     }).catch(function (e) {
       if (e && e.code === 'notfound') {
         // 폭파된 방·없는 코드: 참여시키지 않고 목록으로 튕겨낸다

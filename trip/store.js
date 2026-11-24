@@ -314,7 +314,7 @@
   /** 연결이 살아 있을 때만 메타 문서에 쓴다. 첫 스냅샷을 받기 전에는 상대 여행 정보를 덮어쓰지 않는다. */
   function pushMeta(trip, keys) {
     if (!trip || !trip.remoteCode || !conn || conn.code !== trip.remoteCode || !conn.metaReady) return;
-    remoteWrite(trip, metaDoc(trip), metaPayload(trip, keys));
+    remoteWrite(trip, metaDoc(trip), metaPayload(trip, keys), { mustExist: true });
   }
 
   /* ------------------------------------------------------------ runtime */
@@ -1047,8 +1047,9 @@
       var metaRef = fsMod.doc(db, 'trips', code);
       var settled = false;
       var linkedOnce = false;
-
-      return new Promise(function (resolve, reject) {
+      // v23: 이 코드가 폭파된 적이 있는지(무덤 기록)를 먼저 본다 — 늦은 쓰기가 방 문서를 되살려도 링크는 열리지 않는다
+      return readGrave(fsMod, code).then(function (grave) {
+        return new Promise(function (resolve, reject) {
         function done(err) {
           if (settled) return;
           settled = true;
@@ -1061,6 +1062,10 @@
           var exists = snap.exists();
           var metaData = exists ? (snap.data() || {}) : null;
           var destroyed = !exists || !!(metaData && metaData.deleted === true);
+          // 이름·만든 시각·일행이 하나도 없는 껍데기 문서(폭파 뒤 늦은 쓰기가 되살린 방)
+          if (!destroyed && exists && Core.isOrphanRoom(metaData)) destroyed = true;
+          // 폭파 기록이 있고, 그 뒤에 새로 만든 방이 아니면 폭파된 방이다
+          if (!destroyed && exists && graveHit(grave, metaData)) destroyed = true;
           var cached = !!(snap.metadata && snap.metadata.fromCache);
           if (destroyed) {
             // 새 방을 만드는 중이면 우리가 곧 이 문서를 덮어쓴다
@@ -1163,6 +1168,7 @@
 
         // 규칙/네트워크 오류로 응답이 없을 때를 대비한 안전 장치
         setTimeout(function () { done(); }, 12000);
+        });
       });
     });
   };
@@ -1212,9 +1218,19 @@
     }
     return fs.doc(db, 'trips', trip.remoteCode);
   }
-  function remoteWrite(trip, path, data) {
+  function remoteWrite(trip, path, data, opts) {
     var ref = remoteRef(trip, path);
     if (!ref) return false;
+    /* mustExist: 방 문서가 살아 있을 때만 고친다(updateDoc)
+       — 보던 기기의 늦은 메타 쓰기가 폭파된 방 문서를 되살리는 일을 막는다 */
+    if (opts && opts.mustExist && fs && typeof fs.updateDoc === 'function') {
+      fs.updateDoc(ref, data).catch(function (e) {
+        var msg = String((e && (e.code || e.message)) || '');
+        if (/not-?found|no document/i.test(msg)) return;   // 이미 사라진 방 — 조용히 무시
+        reportError(e);
+      });
+      return true;
+    }
     fs.setDoc(ref, data, { merge: true }).catch(reportError);
     return true;
   }
@@ -1280,9 +1296,35 @@
     var keys = Object.keys(trip.deleted);
     if (!keys.length) return;
     var recent = keys.slice(-40).map(function (k) { return { key: k, at: trip.deleted[k] }; });
-    remoteWrite(trip, [trip.remoteCode], { deletedKeys: recent, deletedAt: new Date().toISOString() });
+    remoteWrite(trip, [trip.remoteCode], { deletedKeys: recent, deletedAt: new Date().toISOString() }, { mustExist: true });
   }
   Store.pushDeletes = pushDeletes;
+
+  /* ------------------------------------------- 폭파 무덤(grave)
+     방 문서를 지우면 늦은 메타 쓰기(setDoc merge)가 문서를 통째로 되살릴 수 있다.
+     그래서 폭파할 때 triplog_meta/gone-<코드>에 기록을 남기고, 연결할 때 먼저 본다.
+     · 무덤 이후에 새로 만든 같은 코드의 방(createdAt이 무덤보다 뒤)은 정상으로 본다
+     · 무덤 읽기가 실패해도 방 문서 검사는 그대로 하므로 판단이 더 느슨해지지 않는다 */
+  function graveDocId(code) { return 'gone-' + String(code || '').toUpperCase(); }
+  function readGrave(fsMod, code) {
+    try {
+      if (!fsMod || typeof fsMod.getDoc !== 'function') return Promise.resolve(null);
+      var ref = fsMod.doc(db, 'triplog_meta', graveDocId(code));
+      return withTimeout(fsMod.getDoc(ref), 6000, 'grave-timeout').then(function (snap) {
+        var exists = snap && typeof snap.exists === 'function' ? snap.exists() : !!(snap && snap.data());
+        if (!exists) return null;
+        var d = (snap.data && snap.data()) || {};
+        return { found: true, at: String(d.at || d.deletedAt || ''), by: String(d.by || '') };
+      }, function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+  Store.readGrave = function (code) { return fs ? readGrave(fs, code) : Promise.resolve(null); };
+  function graveHit(grave, meta) {
+    if (!grave || !grave.found) return false;
+    var created = String((meta && meta.createdAt) || '');
+    if (created && grave.at && created > grave.at) return false;   // 폭파 뒤에 새로 만든 같은 코드의 방
+    return true;
+  }
 
   /* 테스트 전용: 실제 Firebase 없이 원격 쓰기 경로를 검사할 때 가짜 모듈을 끼워 넣는다 */
   Store.testInjectRemote = function (fsMod, dbStub) { fs = fsMod || null; db = dbStub || null; loadedKey = (fs && db) ? fbKey(null) : ''; };
@@ -1312,8 +1354,8 @@
       Store.removeTrip(tripId);
       return Promise.resolve({ code: '', local: true });
     }
-    // 방장만 방을 폭파할 수 있다 (일행은 목록에서 빼는 것만 가능)
-    if (trip.ownerUid && !Core.canManageMembers(trip, currentUser())) {
+    // 방장(또는 예전 방에서 방장으로 확인되는 계정)만 방을 폭파할 수 있다 (일행은 목록에서 빼는 것만 가능)
+    if (!Core.canDestroyRoom(trip, currentUser())) {
       return Promise.reject(Object.assign(new Error('방장만 방을 삭제할 수 있어요'), { code: 'notowner' }));
     }
     var items = [];
@@ -1324,11 +1366,21 @@
     return Promise.resolve().then(function () { return loadFb(); }).then(function (fsMod) {
       var metaRef = fsMod.doc(db, 'trips', code);
       var acct = currentUser();
-      return fsMod.setDoc(metaRef, {
-        deleted: true,
-        deletedAt: new Date().toISOString(),
-        deletedBy: (acct && acct.uid) || ''
-      }, { merge: true }).then(function () {
+      var stamp = new Date().toISOString();
+      // 먼저 폭파 기록(무덤)을 남긴다 — 이후 어떤 경로(늦은 쓰기·캐시·새로고침)로도 링크가 열리지 않게
+      var mark = function () {
+        try {
+          return fsMod.setDoc(fsMod.doc(db, 'triplog_meta', graveDocId(code)),
+            { code: code, at: stamp, by: (acct && acct.uid) || '' }).catch(function () {});
+        } catch (e) { return Promise.resolve(); }
+      };
+      return mark().then(function () {
+        return fsMod.setDoc(metaRef, {
+          deleted: true,
+          deletedAt: stamp,
+          deletedBy: (acct && acct.uid) || ''
+        }, { merge: true });
+      }).then(function () {
         // 항목 문서는 하나씩 지운다 (실패해도 방 폭파는 계속한다)
         var chain = Promise.resolve();
         items.forEach(function (pair) {

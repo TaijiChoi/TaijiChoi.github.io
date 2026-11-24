@@ -77,6 +77,28 @@
     return Core.mapSource('google');
   };
 
+  /** 그 날 도로 경로 상태 (map.js의 TL.Route). 없으면 'none' */
+  S.routeStateOf = function (items) {
+    var R = TL.Route;
+    if (!R || !R.state) return { status: 'none', route: null };
+    try { return R.state(items) || { status: 'none', route: null }; } catch (e) { return { status: 'none', route: null }; }
+  };
+
+  /** 도로 경로 / 직선 폴백을 화면에서 분명히 구분하는 배지 */
+  S.routeBadgeOf = function (rs, sum) {
+    if (sum.anyRoad) {
+      return { cls: 'road', label: '도로 경로 기준',
+        note: sum.straightCount ? '일부 구간은 도로 경로가 없어 직선으로 추정했어요' : 'OSRM 자동차 경로 · 실제 도로 거리와 예상 시간' };
+    }
+    if (rs.status === 'loading' || rs.status === 'idle') {
+      return { cls: 'loading', label: '도로 경로 확인 중…', note: '잠시 뒤 실제 도로 거리와 시간으로 바뀌어요' };
+    }
+    if (rs.status === 'fail') {
+      return { cls: 'straight', label: '직선 추정(폴백)', note: '도로 경로를 받지 못해 직선거리로 계산했어요 · 오프라인·배편 구간은 도로 경로가 없어요' };
+    }
+    return { cls: 'straight', label: '직선 추정(폴백)', note: '도로 경로 정보가 없어 직선거리로 계산했어요' };
+  };
+
   S.routePanel = function (trip, day, items, view) {
     var geo = items.filter(Core.hasGeo);
     if (!geo.length) {
@@ -87,12 +109,21 @@
     }
     var open = view.mapOpen;
     if (open == null) open = geo.length >= 2;
-    var segs = Core.segments(items);
+    var rs = S.routeStateOf(items);
+    var sum = Core.routeSummary(items, rs.route);
+    var badge = S.routeBadgeOf(rs, sum);
+    var headNote = geo.length + '곳';
+    if (sum.segs.length) {
+      headNote += ' · 구간 ' + sum.segs.length + '개 · ' + (sum.anyRoad ? '도로 ' : '직선 ') + Core.kmLabel(sum.km);
+      if (sum.anyRoad) headNote += ' · 약 ' + Core.durLabel(sum.min);
+    } else {
+      headNote += ' · 핀만 표시';
+    }
     var html = '<div class="route-card">';
     html += '<button class="route-head" data-action="toggle-map" aria-expanded="' + (open ? 'true' : 'false') + '">' +
       '<span class="rh-ic">' + UI.icon('map', 18) + '</span>' +
-      '<span class="rb-tx"><b>하루 동선 지도</b><small>' + geo.length + '곳' +
-        (segs.length ? ' · 구간 ' + segs.length + '개 · 총 ' + Core.kmLabel(segs.reduce(function (a, s) { return a + s.km; }, 0)) : ' · 핀만 표시') + '</small></span>' +
+      '<span class="rb-tx"><b>하루 동선 지도</b><small>' + headNote + '</small></span>' +
+      (sum.segs.length ? '<span class="rt-badge ' + badge.cls + ' head">' + badge.label + '</span>' : '') +
       '<span class="chev' + (open ? ' open' : '') + '">' + UI.icon('down', 16) + '</span>' +
     '</button>';
     var src = S.mapSourceOf(view);
@@ -110,16 +141,26 @@
         '<div class="map-note">' + (src.key === 'google'
           ? 'Google 지도 · 타일이 안 보이면 OSM으로 바꿔 보세요 · 오프라인에서는 지도 그림 없이 아래 구간 정보만 보여요'
           : 'OpenStreetMap · 오프라인에서는 지도 그림 없이 아래 구간 정보만 보여요') + '</div></div>';
+      // v23: 도로 경로 기준 / 직선 추정(폴백)을 분명히
+      html += '<div class="route-src ' + badge.cls + '"><span class="rt-badge ' + badge.cls + '">' + badge.label + '</span>' +
+        '<span class="rs-note">' + UI.esc(badge.note) + '</span></div>';
+      // v23: 카테고리 색 범례 (핀 색 = 일정 종류)
+      var legend = Core.catLegend(geo);
+      if (legend.length) {
+        html += '<div class="cat-legend" aria-label="카테고리 색 범례">' + legend.map(function (c) {
+          return '<span class="cl-item" data-cat="' + c.key + '"><i style="background:' + c.color + '"></i>' + UI.esc(c.label) + '</span>';
+        }).join('') + '</div>';
+      }
       html += '<div class="route-pins">' + geo.map(function (it, i) {
-        return '<span class="rp"><b>' + (i + 1) + '</b>' + UI.esc(it.title) + '</span>';
+        return '<span class="rp"><b style="background:' + Core.catColor(it.category) + '">' + (i + 1) + '</b>' + UI.esc(it.title) + '</span>';
       }).join('') + '</div>';
       if (routeUrl) {
         html += '<a class="btn btn-soft map-all" href="' + UI.esc(routeUrl) + '" target="_blank" rel="noopener"' +
           (geo.length > 1 ? ' title="' + UI.esc(geo.slice(0, 10).map(function (it) { return it.title; }).join(' → ')) + '"' : '') + '>' +
           UI.icon('map', 17) + Core.routeMapLabel(geo.length) + '</a>';
       }
-      if (segs.length) {
-        html += '<div class="seg-list">' + segs.map(function (s, i) { return S.segRow(s, i); }).join('') + '</div>';
+      if (sum.segs.length) {
+        html += '<div class="seg-list">' + sum.segs.map(function (s, i) { return S.segRow(s, i); }).join('') + '</div>';
       } else {
         html += '<div class="hintline" style="padding:0 12px 10px">좌표가 있는 일정이 2곳 이상이면 구간 거리와 길찾기가 나와요.</div>';
       }
@@ -130,10 +171,15 @@
 
   S.segRow = function (seg, i) {
     var links = Core.directionsLinks(seg.from, seg.to);
-    return '<div class="seg-row">' +
+    var detail = seg.road
+      ? '<span class="seg-tag road">도로</span> ' + Core.kmLabel(seg.km) + ' · 차 약 ' + Core.durLabel(seg.min) +
+        ' <span class="seg-alt">직선 ' + Core.kmLabel(seg.straightKm) + '</span>'
+      : '<span class="seg-tag straight">직선 추정</span> ' + Core.kmLabel(seg.km) + ' · 도보 약 ' + Core.durLabel(seg.walkMin) +
+        ' · 차 약 ' + Core.durLabel(seg.carMin);
+    return '<div class="seg-row' + (seg.road ? ' road' : '') + '">' +
       '<span class="seg-n">' + (i + 1) + '→' + (i + 2) + '</span>' +
       '<span class="seg-mid"><b>' + UI.esc(seg.fromTitle) + ' → ' + UI.esc(seg.toTitle) + '</b>' +
-        '<small>직선 ' + Core.kmLabel(seg.km) + ' · 도보 약 ' + Core.durLabel(seg.walkMin) + ' · 차 약 ' + Core.durLabel(seg.carMin) + '</small></span>' +
+        '<small>' + detail + '</small></span>' +
       (links ? '<span class="seg-links">' +
         '<a class="tl-map kakao" href="' + links.kakao + '" target="_blank" rel="noopener">카카오 길찾기</a>' +
         '<a class="tl-map google" href="' + links.google + '" target="_blank" rel="noopener">구글 도보</a>' +
