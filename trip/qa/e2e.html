@@ -525,7 +525,11 @@
     }
     ok(shellHit, 'core.js가 캐시에 있음', swDiag);
     var cacheList = [];
-    try { cacheList = (await (await w.caches.open('triplog-v' + VER)).keys()).map(function (r) { return r.url.split('/').pop(); }); } catch (e) {}
+    for (var cl = 0; cl < 80; cl++) {   // 프리캐시가 파일을 하나씩 더하는 동안 기다린다 (최대 20초)
+      try { cacheList = (await (await w.caches.open('triplog-v' + VER)).keys()).map(function (r) { return r.url.split('/').pop(); }); } catch (e) {}
+      if (cacheList.length >= 15) break;
+      await sleep(250);
+    }
     ok(cacheList.length >= 15, '앱 셸 파일 캐시 수', cacheList.length + '개');
     w.dispatchEvent(new w.Event('offline'));
     await sleep(180);
