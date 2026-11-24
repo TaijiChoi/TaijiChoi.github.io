@@ -1211,8 +1211,8 @@
     ok(roadShown, 'v23 도로 경로 기준 배지');
     ok(text('.route-head .rb-tx small').indexOf('도로 8.2km') >= 0, 'v23 헤더에 실제 도로 거리', text('.route-head .rb-tx small'));
     ok(text('.route-head .rb-tx small').indexOf('약 25분') >= 0, 'v23 헤더에 주행 시간', text('.route-head .rb-tx small'));
-    ok(!!q('#route-map .leaflet-container'), 'v23 도로 경로와 함께 지도 렌더');
-    var osrmUrl = w.eval('__osrm[0] || ""');
+    ok(!!q('#route-map.leaflet-container') || !!q('.route-map.leaflet-container'), 'v23 도로 경로와 함께 지도 렌더');
+    var osrmUrl = w.eval('(__osrm.filter(function (u) { return u.indexOf("126.7963,37.5583") >= 0; })[0]) || ""');
     ok(/^https:\/\/router\.project-osrm\.org\/route\/v1\/driving\/126\.7963,37\.5583;/.test(osrmUrl), 'v23 OSRM 요청 주소·좌표 순서(lng,lat)', osrmUrl.slice(0, 90));
     ok(/overview=full/.test(osrmUrl) && /geometries=geojson/.test(osrmUrl) && /alternatives=false/.test(osrmUrl), 'v23 OSRM 요청 옵션', osrmUrl.slice(-70));
     var vpins = qa('#route-map .rt-icon .rt-pin');
@@ -1286,15 +1286,16 @@
       '  members: [{ id: "a", name: "Taiji" }, { id: "c", name: "Jaewon Taiji", uid: "qa1" }], rates: {}, remoteCode: "HMHLXW",',
       '  data: { schedules: [], expenses: [], checklist: [], reservations: [] } });',
       'TL.Store.notify();',
-      'TL.Store.setCurrent("remote_HMHLXW");',
-      'TL.App.view.screen = "trip"; TL.App.view.tripId = "remote_HMHLXW"; TL.App.view.tab = "schedule"; TL.App.view.day = "";',
-      'TL.App.render();'
+      'TL.App.openTrip("remote_HMHLXW", "schedule");'
     ].join('\n'));
-    await sleep(250);
-    ok(!!q('.tl') || text('#screen').indexOf('국내여행') >= 0, 'v23 예전 방(HMHLXW) 화면 열림', w.TL.App.view.tripId);
+    await sleep(400);
+    ok(text('#screen').indexOf('국내여행') >= 0, 'v23 예전 방(HMHLXW) 화면 열림', w.TL.App.view.tripId);
+    ok(w.eval('TL.Store.trip("remote_HMHLXW").remoteCode') === 'HMHLXW', 'v23 예전 방 초대코드 유지', w.eval('TL.Store.trip("remote_HMHLXW").remoteCode'));
     ok(w.eval('TL.Core.canDestroyRoom(TL.Store.trip("remote_HMHLXW"), { uid: "qa1" })'), 'v23 예전 방: 계정이 연결된 일행이면 방장으로 인정');
-    w.eval("TL.Actions['delete-trip']()");
-    await sleep(200);
+    await clickSel('[data-action="edit-trip"]');
+    await sleep(250);
+    await clickSel('[data-action="delete-trip"]');
+    await sleep(250);
     ok(!!q('[data-action="delete-trip-confirm"]') && text('.danger-lead').indexOf('방이 완전히 사라지며') >= 0, 'v23 예전 방: 완전히 삭제 안내', text('.danger-lead').slice(0, 50));
     ok(text('.sheet-body').indexOf('목록에서 빼기') < 0, 'v23 예전 방: 목록에서 빼기가 아니라 완전히 삭제');
     ok(text('.danger-list').indexOf('HMHLXW') >= 0, 'v23 초대코드 안내', text('.danger-list').slice(0, 60));
