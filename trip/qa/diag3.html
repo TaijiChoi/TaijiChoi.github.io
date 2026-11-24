@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>v23 진단3</title>
+<style>body{margin:0;background:#0F172A;color:#E5EDFB;font:12px/1.5 ui-monospace,monospace}
+iframe{width:390px;height:844px;border:0}#out{padding:10px;white-space:pre-wrap}</style></head>
+<body>
+<iframe id="f" src="../index.html?qa=1"></iframe>
+<pre id="out">…</pre>
+<script>
+(function () {
+  var f = document.getElementById('f'), out = document.getElementById('out'), lines = [];
+  function log(o) { lines.push(typeof o === 'string' ? o : JSON.stringify(o)); out.textContent = lines.join('\n'); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function w() { return f.contentWindow; }
+  function ready() { try { var x = w(); return !!(x && x.TL && x.TL.App && x.document.getElementById('screen')); } catch (e) { return false; } }
+  async function run() {
+    for (var i = 0; i < 100 && !ready(); i++) await sleep(100);
+    if (!ready()) return log('boot fail');
+    var win = w(), doc = win.document;
+    win.localStorage.clear();
+    win.eval('TL.Auth.testSignIn({ uid: "qa1", displayName: "테스트", email: "qa@example.com" })');
+    win.eval([
+      'globalThis.__cv = [];',
+      'globalThis.__origCV = TL.Core.canViewTrip;',
+      'TL.Core.canViewTrip = function (t, u) { var r = __origCV(t, u); __cv.push({ id: t && t.id, members: (t && t.members || []).length, uid: u && u.uid, r: r }); return r; };',
+      'globalThis.__rt = [];',
+      'globalThis.__origRender = TL.App.render;',
+      'TL.App.render = function () { __rt.push({ screen: TL.App.view.screen, tripId: TL.App.view.tripId, signed: TL.Auth.signedIn(), uid: (TL.Auth.currentUser() || {}).uid }); return __origRender.apply(this, arguments); };'
+    ].join('\n'));
+    win.eval('TL.Store.clearAll()');
+    win.eval('TL.Store.state().trips.push({ id: "remote_HMHLXW", name: "국내여행", destination: "강릉", startDate: "2026-11-28", endDate: "2026-11-30", members: [{ id: "a", name: "Taiji" }, { id: "c", name: "Jaewon Taiji", uid: "qa1" }], rates: {}, remoteCode: "HMHLXW", data: { schedules: [], expenses: [], checklist: [], reservations: [] } }); TL.Store.notify();');
+    await sleep(200);
+    win.eval('TL.App.openTrip("remote_HMHLXW", "schedule")');
+    await sleep(300);
+    log({ cv: win.eval('__cv'), rt: win.eval('__rt'), screen: win.eval('TL.App.view.screen'), signed: win.eval('TL.Auth.signedIn()'), cur: win.eval('TL.Auth.currentUser()'), trip: win.eval('!!TL.Store.trip("remote_HMHLXW")') });
+    document.title = 'diag-done';
+  }
+  run().catch(function (e) { log('EX ' + (e && e.stack || e)); document.title = 'diag-done'; });
+})();
+</script></body></html>
