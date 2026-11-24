@@ -49,9 +49,8 @@
     exp('d1', 320000, 'KRW', 1, 'stay', '숙소 잔금');
     win.TL.Store.add(t.id, 'schedules', { dayKey: 'd1', time: '10:00', title: '우붓 시장', category: 'sight', place: '우붓 시장', lat: -8.5069, lng: 115.2625, source: 'map' });
     win.TL.Store.add(t.id, 'schedules', { dayKey: 'd1', time: '13:00', title: '짬뿌한 폭포', category: 'sight', place: '짬뿌한', lat: -8.5912, lng: 115.2855, source: 'map' });
-    // 캡처에는 '연결 중…' 대신 기기 저장 상태로 보이게 한다
-    var cur = win.TL.Store.trip(t.id);
-    delete cur.remoteCode; delete cur.inviteCode;
+    // 캡처에는 실제 연결처럼 '일행과 실시간 공유 중'으로 보이게 한다 (서버는 건드리지 않음)
+    win.TL.Store.testInjectConn(t.id, 'SHOT22', true);
     win.TL.Store.notify();
     window.__tripId = t.id;
     return t.id;
