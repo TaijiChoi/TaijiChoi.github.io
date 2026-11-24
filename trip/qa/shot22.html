@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>트립로그 v22 화면 캡처 — 실시간 환율·IDR / 지도 핀</title>
+<style>
+  body{margin:0;padding:16px;background:#0F172A;display:flex;gap:18px;align-items:flex-start;font-family:sans-serif;color:#fff}
+  figure{margin:0}
+  iframe{width:390px;height:844px;border:0;border-radius:16px;background:#fff;display:block}
+  figcaption{font-size:13px;padding:8px 2px;color:#9FB3D0}
+</style>
+</head>
+<body>
+<figure><iframe id="f1" title="가계부 실시간 환율" src="../index.html?shot=22a"></iframe>
+  <figcaption>가계부 — 실시간 환율 새로고침 · 통화별 합계(IDR) · 정산 복사</figcaption></figure>
+<figure><iframe id="f2" title="지도에서 위치 찍기" src="../index.html?shot=22b"></iframe>
+  <figcaption>일정 — 지도에서 위치 찍기(구글지도/OSM) · 지도 링크 붙여넣기</figcaption></figure>
+<script>
+(function () {
+  'use strict';
+  function ready(f) {
+    try { var w = f.contentWindow; return !!(w && w.TL && w.TL.Store && w.TL.App && w.document.getElementById('screen')); } catch (e) { return false; }
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  async function waitReady(f) {
+    for (var i = 0; i < 140; i++) { if (ready(f)) return true; await sleep(80); }
+    return false;
+  }
+  /* 캡처용: 실제 Firestore에 방을 만들지 않도록 연결을 가짜로 바꾼다 */
+  function stub(w) {
+    w.eval('TL.Store.connect = function (tripId) { var t = TL.Store.trip(tripId); if (t && !t.remoteCode) { t.remoteCode = "SHOT22"; t.inviteCode = "SHOT22"; } return Promise.resolve({ code: "SHOT22" }); };');
+    w.eval('TL.Store.testSetRateFetcher(function () { return Promise.resolve({ IDR: 0.0875, USD: 1390, JPY: 9.6 }); });');
+  }
+  function seed(w) {
+    w.TL.Auth.testSignIn({ uid: 'shot22', displayName: '재원', email: 'shot22@example.com' });
+    w.TL.Store.clearAll();
+    var t = w.TL.Store.createTrip({
+      name: '발리 4박 5일', destination: '발리', startDate: '2026-12-05', endDate: '2026-12-09',
+      members: [{ id: 'm1', name: '재원', uid: 'shot22' }, { id: 'm2', name: '아내' }, { id: 'm3', name: '아들' }],
+      baseCurrency: 'IDR', rates: { IDR: 0.0875, USD: 1390 }
+    });
+    var ids = ['m1', 'm2', 'm3'];
+    function exp(day, amount, cur, rate, cat, title) {
+      w.TL.Store.add(t.id, 'expenses', {
+        dayKey: day, amount: amount, currency: cur, rate: rate, category: cat, title: title,
+        payerId: 'm1', sharedWith: ids
+      });
+    }
+    exp('d1', 1250000, 'IDR', 0.0875, 'food', '우붓 저녁');
+    exp('d2', 850000, 'IDR', 0.0875, 'etc', '스파 마사지');
+    exp('d2', 350000, 'IDR', 0.0875, 'transport', '공항 택시');
+    exp('d3', 24.5, 'USD', 1390, 'food', '비치 클럽');
+    exp('d1', 320000, 'KRW', 1, 'stay', '숙소 잔금');
+    w.TL.Store.add(t.id, 'schedules', { dayKey: 'd1', time: '10:00', title: '우붓 시장', category: 'sight', place: '우붓 시장', lat: -8.5069, lng: 115.2625, source: 'map' });
+    w.TL.Store.add(t.id, 'schedules', { dayKey: 'd1', time: '13:00', title: '짬뿌한 폭포', category: 'sight', place: '짬뿌한', lat: -8.5912, lng: 115.2855, source: 'map' });
+    return t;
+  }
+  async function main() {
+    var f1 = document.getElementById('f1'), f2 = document.getElementById('f2');
+    await Promise.all([waitReady(f1), waitReady(f2)]);
+    var w1 = f1.contentWindow, w2 = f2.contentWindow;
+
+    /* 1) 가계부 — 실시간 환율·통화별 합계·정산 복사 */
+    stub(w1);
+    w1.localStorage.clear();
+    await sleep(150);
+    var t1 = seed(w1);
+    w1.TL.App.openTrip(t1.id, 'money');
+    await sleep(300);
+    w1.TL.Actions['refresh-rates']();
+    await sleep(500);
+    w1.TL.App.render();
+    await sleep(300);
+    w1.scrollTo(0, 0);
+
+    /* 2) 일정 — 지도에서 위치 찍기 */
+    stub(w2);
+    w2.localStorage.clear();
+    await sleep(150);
+    var t2 = seed(w2);
+    w2.TL.App.openTrip(t2.id, 'schedule');
+    await sleep(350);
+    w2.TL.Dialogs.schedule(w2.TL.Store.trip(t2.id), null, 'd1');
+    await sleep(200);
+    var doc2 = w2.document;
+    doc2.getElementById('f_coord').value = 'https://www.google.com/maps/place/Ubud/@-8.5,115.2,17z/data=!3d-8.5069!4d115.2625';
+    w2.TL.Actions['use-coord']();
+    await sleep(250);
+    w2.TL.Actions['pin-toggle'](doc2.querySelector('[data-action="pin-toggle"]'));
+    for (var i = 0; i < 60; i++) {
+      if (doc2.querySelector('#pin-map.leaflet-container')) break;
+      await sleep(150);
+    }
+    w2.TL.Dialogs.testPickAt(-8.5069, 115.2625);
+    await sleep(200);
+    if (w2.TL.RouteMap && w2.TL.RouteMap.recenterPick) w2.TL.RouteMap.recenterPick(-8.5069, 115.2625);
+    doc2.getElementById('f_title').value = '우붓 시장';
+    var body = doc2.querySelector('.sheet-body') || doc2.querySelector('.sheet');
+    if (body) body.scrollTop = 170;
+    await sleep(1500);
+    document.title = 'shot-ready';
+  }
+  main().catch(function (e) { document.title = 'shot-error ' + (e && e.message); });
+})();
+</script>
+</body>
+</html>
