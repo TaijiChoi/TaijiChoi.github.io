@@ -288,7 +288,9 @@
     /* 서비스 워커 */
     var reg = null;
     for (var rgi = 0; rgi < 80; rgi++) {
-      try { reg = await w.navigator.serviceWorker.getRegistration(); } catch (e) {}
+      try { reg = await navigator.serviceWorker.getRegistration(); } catch (e) { reg = null; }
+      if (reg) break;
+      try { reg = await w.navigator.serviceWorker.getRegistration(); } catch (e2) { reg = null; }
       if (reg) break;
       await sleep(250);
     }
