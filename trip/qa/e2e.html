@@ -1188,40 +1188,50 @@
     ok(/user-not-found|invalid-credential|wrong-password|invalid-login-credentials/.test(String(authProbe)), '기본 설정으로 Firebase Auth 응답(로그인 가능)', authProbe);
 
     /* ============ v23: 실제 도로 경로(OSRM) · 카테고리 핀 색 · 폭파 방 차단 재점검 ============ */
-    w.eval('TL.Auth.testSignIn({ uid: "qa1", displayName: "테스트 재원", email: "qa@example.com" })');
+    // 로그인 상태가 흔들리면(실제 Firebase Auth 콜백) 다시 세운다
+    function keepSignedIn() {
+      if (!w.TL.Auth.signedIn()) w.TL.Auth.testSignIn({ uid: 'qa1', displayName: '테스트 재원', email: 'qa@example.com' });
+    }
     w.eval('TL.Store.setFirebase({ apiKey: "qa-key", projectId: "qa-project", appId: "qa-app" })');
+    await sleep(150);
+    keepSignedIn();
+    await sleep(200);
+    keepSignedIn();
+    ok(w.TL.Auth.signedIn(), 'v23 준비: 로그인 유지', w.eval('(TL.Auth.currentUser()||{}).uid'));
     w.eval([
       '(function () {',
-      '  var t = TL.Store.createTrip({ name: "v23 도로 경로", destination: "서울", startDate: "2026-12-10", endDate: "2026-12-12", members: [{ id: "a", name: "재원" }] });',
+      '  var t = TL.Store.createTrip({ name: "v23 도로 경로", destination: "서울", startDate: "2026-12-10", endDate: "2026-12-12", members: [{ id: "a", name: "재원", uid: "qa1", email: "qa@example.com" }] });',
       '  globalThis.__v23tripId = t.id;',
       '  TL.Store.add(t.id, "schedules", { dayKey: "d1", title: "김포공항", category: "transport", lat: 37.5583, lng: 126.7963, order: 0 });',
       '  TL.Store.add(t.id, "schedules", { dayKey: "d1", title: "광장시장", category: "food", lat: 37.5701, lng: 126.9996, order: 1 });',
       '  TL.Store.add(t.id, "schedules", { dayKey: "d1", title: "경복궁", category: "sight", lat: 37.5796, lng: 126.977, order: 2 });',
       '  TL.Route.clear();',
-      '  TL.App.openTrip(t.id, "schedule");',
       '})();'
     ].join('\n'));
+    keepSignedIn();
+    w.eval('TL.App.openTrip(__v23tripId, "schedule"); TL.App.view.mapOpen = true; TL.App.render();');
     await sleep(300);
-    await click(q('.chip[data-day="d1"]'));
+    ok(w.eval('TL.App.view.tripId === __v23tripId') && !!q('.route-card'), 'v23 여행 화면·동선 카드', w.eval('TL.App.view.tripId'));
     var roadShown = false;
-    for (var rq = 0; rq < 60; rq++) {
-      if (q('.rt-badge.road')) { roadShown = true; break; }
-      await sleep(150);
+    for (var rq = 0; rq < 80; rq++) {
+      if (q('.rt-badge.road') && q('#route-map .rt-icon .rt-pin')) { roadShown = true; break; }
+      if (!w.TL.Auth.signedIn()) { keepSignedIn(); w.eval('TL.App.openTrip(__v23tripId, "schedule"); TL.App.view.mapOpen = true; TL.App.render();'); }
+      await sleep(200);
     }
-    ok(roadShown, 'v23 도로 경로 기준 배지');
+    ok(roadShown, 'v23 도로 경로 배지 + 지도 핀');
     ok(text('.route-head .rb-tx small').indexOf('도로 8.2km') >= 0, 'v23 헤더에 실제 도로 거리', text('.route-head .rb-tx small'));
     ok(text('.route-head .rb-tx small').indexOf('약 25분') >= 0, 'v23 헤더에 주행 시간', text('.route-head .rb-tx small'));
-    ok(!!q('#route-map.leaflet-container') || !!q('.route-map.leaflet-container'), 'v23 도로 경로와 함께 지도 렌더');
+    ok(!!q('#route-map.leaflet-container'), 'v23 도로 경로와 함께 지도 렌더');
     var osrmUrl = w.eval('(__osrm.filter(function (u) { return u.indexOf("126.7963,37.5583") >= 0; })[0]) || ""');
-    ok(/^https:\/\/router\.project-osrm\.org\/route\/v1\/driving\/126\.7963,37\.5583;/.test(osrmUrl), 'v23 OSRM 요청 주소·좌표 순서(lng,lat)', osrmUrl.slice(0, 90));
-    ok(/overview=full/.test(osrmUrl) && /geometries=geojson/.test(osrmUrl) && /alternatives=false/.test(osrmUrl), 'v23 OSRM 요청 옵션', osrmUrl.slice(-70));
+    ok(/^https:\/\/router\.project-osrm\.org\/route\/v1\/driving\/126\.7963,37\.5583;/.test(osrmUrl), 'v23 OSRM 요청 주소·좌표 순서(lng,lat)', String(osrmUrl).slice(0, 90));
+    ok(/overview=full/.test(osrmUrl) && /geometries=geojson/.test(osrmUrl) && /alternatives=false/.test(osrmUrl), 'v23 OSRM 요청 옵션', String(osrmUrl).slice(-70));
     var vpins = qa('#route-map .rt-icon .rt-pin');
     ok(vpins.length === 3, 'v23 좌표 일정 3곳 핀', vpins.length);
     ok(vpins.map(function (p) { return p.textContent.trim(); }).join('') === '123', 'v23 핀 번호 1,2,3 유지', vpins.map(function (p) { return p.textContent.trim(); }).join(''));
     var pinStyle = vpins.map(function (p) { return p.getAttribute('style') || ''; });
-    ok(/0E8F87/i.test(pinStyle[0]), 'v23 핀1 교통=청록', pinStyle[0]);
-    ok(/F2680C/i.test(pinStyle[1]), 'v23 핀2 식당=주황', pinStyle[1]);
-    ok(/2F6BFF/i.test(pinStyle[2]), 'v23 핀3 관광=파랑', pinStyle[2]);
+    ok(/0E8F87/i.test(pinStyle[0] || ''), 'v23 핀1 교통=청록', pinStyle[0]);
+    ok(/F2680C/i.test(pinStyle[1] || ''), 'v23 핀2 식당=주황', pinStyle[1]);
+    ok(/2F6BFF/i.test(pinStyle[2] || ''), 'v23 핀3 관광=파랑', pinStyle[2]);
     ok(pinStyle[0] !== pinStyle[1] && pinStyle[1] !== pinStyle[2], 'v23 카테고리마다 다른 핀 색');
     ok(qa('.cat-legend .cl-item').length === 3, 'v23 카테고리 색 범례 3개', qa('.cat-legend .cl-item').length);
     ok(text('.cat-legend').indexOf('교통') >= 0 && text('.cat-legend').indexOf('식당') >= 0 && text('.cat-legend').indexOf('관광') >= 0, 'v23 범례에 교통·식당·관광', text('.cat-legend'));
@@ -1234,11 +1244,11 @@
     noOverflow('도로 경로 동선');
 
     // 도로 경로를 못 받으면 직선 추정(폴백)으로 표시된다
-    w.eval('TL.Route.testSetFetcher(function () { return Promise.reject(new Error("offline")); }); TL.Route.clear(); TL.App.render();');
+    w.eval('TL.Route.testSetFetcher(function () { return Promise.reject(new Error("offline")); }); TL.Route.clear(); TL.App.view.mapOpen = true; TL.App.render();');
     var fell = false;
-    for (var fr = 0; fr < 60; fr++) {
+    for (var fr = 0; fr < 80; fr++) {
       if (q('.rt-badge.straight')) { fell = true; break; }
-      await sleep(150);
+      await sleep(200);
     }
     ok(fell, 'v23 실패하면 직선 추정(폴백) 배지');
     ok(text('.route-src').indexOf('직선거리로 계산') >= 0, 'v23 폴백 안내 문구', text('.route-src').slice(0, 60));
@@ -1285,10 +1295,13 @@
       'TL.Store.state().trips.push({ id: "remote_HMHLXW", name: "국내여행", destination: "강릉", startDate: "2026-11-28", endDate: "2026-11-30",',
       '  members: [{ id: "a", name: "Taiji" }, { id: "c", name: "Jaewon Taiji", uid: "qa1" }], rates: {}, remoteCode: "HMHLXW",',
       '  data: { schedules: [], expenses: [], checklist: [], reservations: [] } });',
-      'TL.Store.notify();',
-      'TL.App.openTrip("remote_HMHLXW", "schedule");'
+      'TL.Store.notify();'
     ].join('\n'));
+    await sleep(200);
+    keepSignedIn();
+    w.eval('TL.App.openTrip("remote_HMHLXW", "schedule")');
     await sleep(400);
+    if (!q('.trip-head')) { keepSignedIn(); w.eval('TL.App.openTrip("remote_HMHLXW", "schedule")'); await sleep(300); }
     ok(text('#screen').indexOf('국내여행') >= 0, 'v23 예전 방(HMHLXW) 화면 열림', w.TL.App.view.tripId);
     ok(w.eval('TL.Store.trip("remote_HMHLXW").remoteCode') === 'HMHLXW', 'v23 예전 방 초대코드 유지', w.eval('TL.Store.trip("remote_HMHLXW").remoteCode'));
     ok(w.eval('TL.Core.canDestroyRoom(TL.Store.trip("remote_HMHLXW"), { uid: "qa1" })'), 'v23 예전 방: 계정이 연결된 일행이면 방장으로 인정');
@@ -1302,7 +1315,7 @@
     noOverflow('예전 방 삭제 시트');
     await clickSel('[data-action="delete-trip-confirm"]');
     var graveOk = false;
-    for (var gq = 0; gq < 50; gq++) {
+    for (var gq = 0; gq < 60; gq++) {
       if (w.eval('!!__qaDb.docs["triplog_meta/gone-HMHLXW"]')) { graveOk = true; break; }
       await sleep(150);
     }
@@ -1312,14 +1325,12 @@
     var rejoin = await w.eval('TL.Store.joinByCode("HMHLXW", "").then(function () { return "resolved"; }, function (e) { return "rejected:" + (e && e.code); })');
     ok(rejoin === 'rejected:notfound', 'v23 폭파한 공유 URL(?trip=HMHLXW)은 거절', rejoin);
     ok(w.eval('TL.Store.trips().filter(function (t) { return t.remoteCode === "HMHLXW"; }).length') === 0, 'v23 거절된 링크는 여행 자리를 남기지 않음');
-    // 다른 기기의 늦은 쓰기가 되살린 방 문서 → 무덤·껍데기 검사로 여전히 차단
     w.eval('__qaDb.docs["trips/HMHLXW"] = { name: "되살아난 방", members: [{ id: "a", name: "Taiji" }] };');
     var rejoin2 = await w.eval('TL.Store.joinByCode("HMHLXW", "").then(function () { return "resolved"; }, function (e) { return "rejected:" + (e && e.code); })');
     ok(rejoin2 === 'rejected:notfound', 'v23 되살아난 방 문서도 거절(무덤)', rejoin2);
     w.eval('__qaDb.docs["trips/SHELL23"] = { updatedAt: "2026-11-24T01:00:00.000Z" };');
     var rejoin3 = await w.eval('TL.Store.joinByCode("SHELL23", "").then(function () { return "resolved"; }, function (e) { return "rejected:" + (e && e.code); })');
     ok(rejoin3 === 'rejected:notfound', 'v23 고아 껍데기 방도 거절', rejoin3);
-    // 남의 예전 방은 폭파할 수 없다
     w.eval([
       '__qaDb.docs["trips/OTH999"] = { name: "남의 방", createdAt: "2026-11-20T00:00:00.000Z", members: [{ id: "z", name: "남", uid: "other1" }] };',
       'TL.Store.state().trips.push({ id: "remote_OTH999", name: "남의 방", startDate: "2026-12-01", endDate: "2026-12-02",',
@@ -1329,7 +1340,6 @@
     var otherDel = await w.eval('TL.Store.destroyTrip("remote_OTH999").then(function () { return "ok"; }, function (e) { return "err:" + (e && e.code); })');
     ok(otherDel === 'err:notowner', 'v23 남의 예전 방은 폭파 불가', otherDel);
     ok(w.eval('!!__qaDb.docs["trips/OTH999"]'), 'v23 남의 방 문서는 그대로');
-    // 실제 Firestore를 쓰지 않도록 정리 (QA 방 스텁·주소는 그대로 복구)
     w.eval('TL.Store.disconnect(); TL.Store.testInjectRemote(null, null); TL.Store.removeTrip("remote_OTH999"); TL.Store.clearAll();');
     ok(true, 'v23 모의 Firestore 정리(실제 triplog-c4921 쓰기 없음)');
 
