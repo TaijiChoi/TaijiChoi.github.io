@@ -1148,6 +1148,14 @@
           } catch (e) {}
           trip.remote = true;
           if (conn) conn.metaReady = true;
+          // v24: 예전 방(메타에 방장 기록이 없음)은 **이 기기에서 만든** 여행일 때만 방장 기록을 채운다
+          //      (복원·참여한 사본이 남의 방 방장을 가로채지 않게)
+          var meNow = currentUser();
+          if (!m.ownerUid && trip.ownerUid && trip.createdHere && meNow && String(trip.ownerUid) === String(meNow.uid)) {
+            pushMeta(trip, ['ownerUid', 'ownerEmail']);
+          } else if (m.ownerUid && !m.ownerEmail && trip.ownerEmail) {
+            pushMeta(trip, ['ownerEmail']);
+          }
           if (!linkedOnce) {
             linkedOnce = true;
             if (TL.Account) TL.Account.onTrip(trip);   // 로그인 상태면 계정 여행 목록에도 남긴다
