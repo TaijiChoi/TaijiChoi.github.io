@@ -273,8 +273,8 @@
     var dBefore = S.trip(tid).data.expenses.length;
     w.eval('TL.Store.testSetRateFetcher(function () { return Promise.resolve({ JPY: 9.9, USD: 1400, IDR: 0.088 }); });');
     await click(q('[data-action="refresh-rates"]'));
-    for (var dr = 0; dr < 30; dr++) { if (Number(S.trip(tid).rates.JPY) === 9.9) break; await sleep(150); }
-    ok(Number(S.trip(tid).rates.JPY) === 9.9, '데스크톱: 환율 새로고침 반영', S.trip(tid).rates.JPY);
+    for (var dr = 0; dr < 30; dr++) { if (Number(S.trip(tid).rates.USD) === 1400) break; await sleep(150); }
+    ok(Number(S.trip(tid).rates.USD) === 1400, '데스크톱: 환율 새로고침 반영', S.trip(tid).rates.USD);
     ok(S.trip(tid).data.expenses.length === dBefore, '데스크톱: 새로고침은 지출을 만들지 않음');
     noOverflowDesktop('가계부 v22');
 
