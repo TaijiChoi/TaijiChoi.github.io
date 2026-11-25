@@ -9,7 +9,7 @@
 </style>
 </head>
 <body>
-<iframe id="f" title="트립로그 v25 캡처" src="../index.html?shot=25"></iframe>
+<iframe id="f" title="트립로그 v25 캡처" src="../qa/shot25/app.html?shot=25"></iframe>
 <script>
 (function () {
   'use strict';
@@ -64,10 +64,6 @@
     var open = doc.querySelector('[data-action="time-open"]');
     if (open) open.click();
     await sleep(500);
-    /* 시계 버튼(자동 15:30)도 함께 보이게 시트를 조금 올린다 */
-    var body = doc.querySelector('.sheet-body');
-    if (body) body.scrollTop = 104;
-    await sleep(300);
     return true;
   };
   window.__state = function () {
@@ -92,7 +88,7 @@
       var keys = await win.caches.keys();
       await Promise.all(keys.filter(function (k) { return k.indexOf('triplog') === 0; }).map(function (k) { return win.caches.delete(k); }));
     } catch (e) { /* 없으면 그냥 진행 */ }
-    f.src = '../index.html?shot=25&cb=' + Date.now();
+    f.src = '../qa/shot25/app.html?shot=25&cb=' + Date.now();
     await sleep(400);
     if (!(await waitReady())) { document.title = 'shot-error boot2'; return; }
     await sleep(400);
