@@ -763,8 +763,7 @@ body.dragging{user-select:none;-webkit-user-select:none}
 
 /* ============================================================ v25
    일정 시트: 카테고리 라디오 칩(맨 위) · 시계 버튼·휠 피커 · 자동 기본 시간 */
-.cat-pick{display:flex;gap:6px;overflow-x:auto;padding:2px 0 5px;margin:0 -2px;scrollbar-width:none}
-.cat-pick::-webkit-scrollbar{display:none}
+.cat-pick{display:flex;flex-wrap:wrap;gap:6px;padding:2px 0 5px}
 .cat-chip{flex:none;display:inline-flex;align-items:center;gap:5px;height:36px;padding:0 11px;border-radius:11px;
   border:1px solid var(--line);background:#fff;color:var(--ink-2);font-size:12.5px;font-weight:700;letter-spacing:-.2px;
   transition:background .12s ease,border-color .12s ease,color .12s ease}
