@@ -605,7 +605,7 @@
     ok(!!q('#rate-stamp') && text('#rate-stamp').indexOf('기준') >= 0, '가계부: 마지막 갱신 시각', text('#rate-stamp'));
     ok(text('.rate-card').indexOf('1 JPY') >= 0 && text('.rate-card').indexOf('30분') >= 0, '가계부: 기본 환율·30분 캐시 안내');
     ok(!!q('.fx-card') && text('.fx-card').indexOf('JPY') >= 0 && text('.fx-card').indexOf('¥') >= 0, '가계부: 통화별 합계(JPY)', text('.fx-card').slice(0, 60));
-    ok(!!q('[data-action="copy-settle"]') && text('[data-action="copy-settle"]').indexOf('정산 복사') >= 0, '가계부: 정산 복사 버튼');
+    ok(!!q('[data-action="copy-settle"]') && text('[data-action="copy-settle"]').indexOf('정산 내역') >= 0, '가계부: 정산 내역 복사 버튼');
     var beforeRate = S.trip(trip.id).data.expenses.filter(function (e) { return e.title === '라멘'; })[0].rate;
     var hadRate = S.trip(trip.id).rates.JPY;
     w.eval('TL.Store.testSetRateFetcher(function () { return Promise.resolve({ JPY: 9.85, USD: 1400, IDR: 0.088 }); });');

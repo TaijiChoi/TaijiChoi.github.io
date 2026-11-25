@@ -867,7 +867,7 @@ body.dragging{user-select:none;-webkit-user-select:none}
 /* ============================================================ v27 */
 /* 새 버전 배너 */
 .upd-banner{position:fixed;left:50%;transform:translateX(-50%);top:calc(10px + var(--safe-b));
-  z-index:120;display:flex;align-items:center;gap:9px;max-width:min(94vw,520px);
+  width:min(94vw,520px);box-sizing:border-box;z-index:120;display:flex;align-items:center;gap:9px;
   padding:9px 11px;border-radius:14px;background:#101828;color:#fff;
   box-shadow:0 12px 28px rgba(16,24,40,.28)}
 .upd-banner .ub-ic{width:28px;height:28px;border-radius:9px;background:rgba(255,255,255,.14);
