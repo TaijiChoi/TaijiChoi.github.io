@@ -972,14 +972,16 @@
     var set = Core.settle(trip, data);
     var t = Core.totals(trip, data);
     var members = (trip && trip.members) || [];
+    /* v27: 카톡에 그대로 붙여넣을 수 있게 여행명 · 총 정산액 · 1인 평균 · 송금 내역 */
+    var avg = members.length ? Math.round(t.total / members.length) : 0;
     var lines = [];
-    lines.push('[' + ((trip && trip.name) || '여행') + '] 정산');
-    lines.push('총지출 ' + Core.won(t.total) + ' · ' + members.length + '명');
+    lines.push('[' + ((trip && trip.name) || '여행') + '] 정산 내역');
+    lines.push('총지출 ' + Core.won(t.total) + ' · ' + members.length + '명 · 1인 평균 ' + Core.won(avg));
     if (set.transfers && set.transfers.length) {
       lines.push('');
       lines.push('보낼 돈');
       set.transfers.forEach(function (tr) {
-        lines.push('· ' + tr.fromName + ' → ' + tr.toName + ' ' + Core.won(tr.amount));
+        lines.push('· ' + tr.fromName + ' → ' + tr.toName + ' : ' + Core.won(tr.amount));
       });
     } else {
       lines.push('');

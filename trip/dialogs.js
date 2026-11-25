@@ -1169,14 +1169,16 @@
       });
   }
 
-  D.expense = function (trip, id) {
+  D.expense = function (trip, id, prefill) {
     var item = null;
     ((trip.data && trip.data.expenses) || []).forEach(function (e) { if (e.id === id) item = e; });
     if (id && !item) { UI.toast('지출을 찾을 수 없어요'); return; }
+    prefill = prefill || {};
     var members = trip.members || [];
     var me = Store.meId(trip, members[0] && members[0].id);
     var dayKeys = Core.dayList(trip).map(function (d) { return d.key; });
-    var wantDay = item ? item.dayKey : (TL.App.view.day && TL.App.view.day !== 'all' ? TL.App.view.day : 'd1');
+    /* v27: 일정 카드에서 열면 그 일정의 날짜·이름으로 미리 채운다 */
+    var wantDay = item ? item.dayKey : (prefill.dayKey || (TL.App.view.day && TL.App.view.day !== 'all' ? TL.App.view.day : 'd1'));
     if (dayKeys.indexOf(wantDay) < 0) wantDay = dayKeys[dayKeys.length - 1] || 'prep';
     dlg = {
       kind: 'expense', id: id || null, trip: trip,
@@ -1219,7 +1221,8 @@
       }).join('') + '</div></div>';
 
     html += '<div class="form-row"><label class="fl">내용 · 장소</label>' +
-      '<input class="input" id="f_title" placeholder="예: 이치란 라멘" maxlength="50" value="' + UI.esc(item ? item.title : '') + '"></div>';
+      '<input class="input" id="f_title" placeholder="예: 이치란 라멘" maxlength="50" value="' + UI.esc(item ? item.title : (prefill.title || '')) + '">' +
+      (prefill.title && !item ? '<div class="hintline">일정에서 열어 제목·날짜를 채웠어요. 금액만 넣으면 돼요.</div>' : '') + '</div>';
 
     html += '<div class="form-row"><label class="fl">결제한 사람</label><div class="members-pick" id="payer-pick">' +
       members.map(function (m) {
@@ -1471,9 +1474,92 @@
     if (!trip) return;
     var text = Core.settleText(trip, trip.data);
     UI.copyAsync(text).then(function (ok) {
-      if (ok) UI.toast('정산을 복사했어요 · 카톡에 붙여넣으세요', 2400);
+      if (ok) UI.toast('정산 내역을 복사했어요 · 카톡에 붙여넣으세요', 2400);
       else D.settleTextSheet(text);
     });
+  };
+
+  /* ==================================== v27: 일정 카드 → 이 일정 지출 적기 */
+  A['exp-from-sched'] = function (el) {
+    var trip = TL.App.currentTrip();
+    if (!trip) return;
+    var id = el && el.getAttribute ? el.getAttribute('data-id') : '';
+    var it = ((trip.data && trip.data.schedules) || []).filter(function (s) { return s.id === id; })[0];
+    if (!it) { UI.toast('일정을 찾을 수 없어요'); return; }
+    if (!UI.requireLogin('로그인하면 지출을 기록할 수 있어요')) return;
+    D.expense(trip, null, { dayKey: it.dayKey, title: it.placeName || it.place || it.title });
+  };
+
+  /* ============================ v27: 전체 일정 한눈에 보기 · 인쇄/PDF 저장 */
+  D.overviewHtml = function (trip) {
+    if (!trip) return '';
+    var days = Core.dayList(trip);
+    var out = '<div class="ov-head">' +
+      '<h3>' + UI.esc(trip.name) + '</h3>' +
+      '<div class="ov-sub">' + UI.esc(Core.rangeLabel(trip.startDate, trip.endDate)) + ' · ' +
+        Core.tripDayCount(trip) + '일 · ' + (trip.members || []).length + '명</div>' +
+    '</div>';
+    var count = 0;
+    days.forEach(function (d) {
+      var items = Core.sortedSchedules(trip.data, d.key);
+      if (!items.length) return;
+      count += items.length;
+      out += '<div class="ov-day"><div class="ov-day-h"><b>' + UI.esc(d.label) + '</b>' +
+        '<span>' + UI.esc(d.date ? Core.isoLabel(d.date) : '출발 전') + ' · ' + items.length + '개</span></div>' +
+        items.map(function (it) {
+          var cat = Core.schedCat(it.category);
+          var sub = [cat.label, it.placeName || it.place || '', it.address || ''].filter(Boolean).join(' · ');
+          return '<div class="ov-row' + (it.id ? '" data-id="' + UI.esc(it.id) : '') + '">' +
+            '<span class="ov-t">' + (it.time ? UI.esc(it.time) : '미정') + '</span>' +
+            '<span class="ov-x"><b>' + UI.esc(it.title) + '</b>' +
+              (sub ? '<small>' + UI.esc(sub) + '</small>' : '') +
+              (it.memo ? '<i>' + UI.esc(it.memo) + '</i>' : '') +
+            '</span></div>';
+        }).join('') + '</div>';
+    });
+    if (!count) out += '<div class="empty-settle">아직 등록한 일정이 없어요.</div>';
+    var resv = (trip.data && trip.data.reservations) || [];
+    if (resv.length) {
+      out += '<div class="ov-day"><div class="ov-day-h"><b>예약</b><span>' + resv.length + '건</span></div>' +
+        resv.map(function (r) {
+          return '<div class="ov-row"><span class="ov-t">예약</span>' +
+            '<span class="ov-x"><b>' + UI.esc(r.title || '예약 메모') + '</b>' +
+              '<small>' + UI.esc(String(r.createdAt || '').slice(0, 10)) + (r.count ? ' · 초안 ' + r.count + '개' : '') + '</small>' +
+            '</span></div>';
+        }).join('') + '</div>';
+    }
+    if (resv.length || count) {
+      out += '<div class="ov-foot">트립로그 · ' + UI.esc(Core.isoLabel(Core.todayISO())) + ' 기준</div>';
+    }
+    return out;
+  };
+  D.overview = function (trip) {
+    if (!trip) return;
+    dlg = { kind: 'overview', trip: trip };
+    D.trip = trip;
+    var html = '<div class="ov-wrap">' + D.overviewHtml(trip) + '</div>' +
+      '<div class="sheet-foot">' +
+        '<button class="btn btn-ghost" data-action="close-modal">닫기</button>' +
+        '<button class="btn btn-primary" data-action="print-overview">🖨 인쇄 / PDF 저장</button>' +
+      '</div>';
+    open(html, '전체 일정');
+  };
+  A['trip-overview'] = function () {
+    var trip = TL.App.currentTrip();
+    if (trip) D.overview(trip);
+  };
+  /** 인쇄용 영역(#print-area)에 같은 내용을 넣고 인쇄 창을 연다 — PDF 저장은 인쇄 창에서 */
+  A['print-overview'] = function () {
+    var trip = (dlg && dlg.kind === 'overview' && dlg.trip) || TL.App.currentTrip();
+    if (!trip) return;
+    var area = document.getElementById('print-area');
+    if (!area) {
+      area = document.createElement('div');
+      area.id = 'print-area';
+      document.body.appendChild(area);
+    }
+    area.innerHTML = D.overviewHtml(trip);
+    try { if (root.print) root.print(); } catch (e) {}
   };
 
   /* ============================================================ 체크리스트 */

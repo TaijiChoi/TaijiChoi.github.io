@@ -66,6 +66,16 @@
     '</button>';
   };
 
+  /* --------------------------------------------------------- v27 전체 일정 */
+  S.overviewBar = function (trip) {
+    var n = ((trip.data && trip.data.schedules) || []).length;
+    return '<button type="button" class="res-bar ov-bar" data-action="trip-overview">' +
+      '<span class="rb-ic">' + UI.icon('calendar', 18) + '</span>' +
+      '<span class="rb-tx"><b>전체 일정 보기</b><small>Day별 일정과 예약을 한 번에 · 인쇄/PDF 저장</small></span>' +
+      '<span class="pill ' + (n ? 'mint' : 'blue') + '">' + (n ? n + '개' : '열기') + '</span>' +
+    '</button>';
+  };
+
   /* --------------------------------------------------------- 동선 지도 */
   /** 동선 지도에 지금 쓰는 타일 소스: 화면 상태 → 기기에 저장한 값 → 구글지도 */
   S.mapSourceOf = function (view) {
@@ -197,6 +207,7 @@
     var html = '';
     html += '<div class="body">';
     html += S.reserveBar(trip);
+    html += S.overviewBar(trip);
     html += S.dayChips(trip, day, 'pick-day');
     html += '<div class="row between" style="margin:14px 2px 6px">' +
       '<span class="tiny muted">' + Core.daySubLabel(trip, day) + '</span>' +
@@ -262,6 +273,7 @@
             '<a class="tl-map google" href="' + links.google + '" target="_blank" rel="noopener">' + UI.icon('map', 13) + '구글맵</a>' +
             (links.place ? '<a class="tl-map place" href="' + UI.esc(links.place) + '" target="_blank" rel="noopener">장소 정보</a>' : '')
             : '') +
+          '<button type="button" class="tl-map exp" data-action="exp-from-sched" data-id="' + UI.esc(it.id) + '" aria-label="' + UI.esc(it.title) + ' 이 일정에 지출 적기">' + UI.icon('wallet', 13) + '지출 적기</button>' +
           '<span class="tl-actions">' +
             '<button class="icon-btn" data-action="move-schedule" data-id="' + UI.esc(it.id) + '" data-dir="-1" ' +
               (n === 1 ? 'disabled' : '') + ' aria-label="위로">' + UI.icon('up', 16) + '</button>' +

@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>트립로그 v27 화면 캡처</title>
+<style>
+  body{margin:0;padding:16px;background:#0F172A;font-family:sans-serif;color:#fff}
+  iframe{width:390px;height:844px;border:0;border-radius:16px;background:#fff;display:block}
+</style>
+</head>
+<body>
+<iframe id="f" title="트립로그 v27 캡처" src="../qa/shot27/app.html?shot=27"></iframe>
+<script>
+(function () {
+  'use strict';
+  var f = document.getElementById('f');
+  function ready() {
+    try { var w = f.contentWindow; return !!(w && w.TL && w.TL.Store && w.TL.App && w.document.getElementById('screen')); } catch (e) { return false; }
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  async function waitReady() {
+    for (var i = 0; i < 160; i++) { if (ready()) return true; await sleep(80); }
+    return false;
+  }
+  function w() { return f.contentWindow; }
+
+  function seed() {
+    var win = w();
+    win.eval('TL.Store.connect = function (tripId) { var t = TL.Store.trip(tripId); if (t && !t.remoteCode) { t.remoteCode = "SHOT27"; t.inviteCode = "SHOT27"; } return Promise.resolve({ code: "SHOT27" }); };');
+    win.TL.Auth.testSignIn({ uid: 'shot27', displayName: '재원', email: 'shot27@example.com' });
+    win.TL.Store.clearAll();
+    var t = win.TL.Store.createTrip({
+      name: '부산 2박 3일', destination: '부산', startDate: '2026-12-05', endDate: '2026-12-07',
+      members: [{ id: 'm1', name: '재원', uid: 'shot27' }, { id: 'm2', name: '아내' }, { id: 'm3', name: '아들' }]
+    });
+    function sched(day, time, title, cat, place, memo, geo) {
+      var o = { dayKey: day, time: time, title: title, category: cat, place: place, placeName: place, memo: memo || '' };
+      if (geo) { o.lat = geo[0]; o.lng = geo[1]; o.source = 'kakao'; }
+      win.TL.Store.add(t.id, 'schedules', o);
+    }
+    sched('prep', '09:20', '김해공항 도착', 'transport', '김해국제공항', 'KE1001 · 예약 ABC123');
+    sched('d1', '12:30', '광안리 해변 산책', 'sight', '광안리 해변', '', [35.1531, 129.1186]);
+    sched('d1', '18:00', '민락회센터 저녁', 'food', '민락회센터', '주차 2시간 무료', [35.1567, 129.1283]);
+    sched('d2', '10:00', '감천문화마을', 'sight', '감천문화마을', '', [35.0975, 129.0106]);
+    sched('d2', '15:30', '카페 온더웨이브', 'cafe', '카페 온더웨이브');
+    sched('d3', '11:00', '흰여울문화마을', 'sight', '흰여울문화마을');
+    win.TL.Store.add(t.id, 'expenses', { id: 'e1', dayKey: 'd1', amount: 96000, currency: 'KRW', rate: 1, category: 'food', payerId: 'm1', sharedWith: ['m1', 'm2', 'm3'], title: '민락회센터' });
+    win.TL.Store.add(t.id, 'expenses', { id: 'e2', dayKey: 'd1', amount: 45000, currency: 'KRW', rate: 1, category: 'transport', payerId: 'm2', sharedWith: ['m1', 'm2', 'm3'], title: '택시' });
+    win.TL.Store.add(t.id, 'expenses', { id: 'e3', dayKey: 'd2', amount: 36000, currency: 'KRW', rate: 1, category: 'food', payerId: 'm1', sharedWith: ['m1', 'm2', 'm3'], title: '돼지국밥' });
+    win.TL.Store.add(t.id, 'reservations', { title: '대한항공 KE1001 김포→김해', text: '2026년 12월 5일 09:20 김포 → 10:25 김해 · 예약 ABC123', count: 2, createdAt: '2026-11-20T10:12:00' });
+    win.TL.Store.testInjectConn(t.id, 'SHOT27', true);
+    win.TL.Store.notify();
+    window.__tripId = t.id;
+  }
+  function emojiFont() {
+    var win = w(), doc = win.document;
+    if (doc.getElementById('shot-emoji-font')) return;
+    var st = doc.createElement('style');
+    st.id = 'shot-emoji-font';
+    st.textContent = "@import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji');" +
+      "body,button,input,textarea{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Noto Sans KR',Roboto,'Noto Color Emoji',sans-serif !important}";
+    doc.head.appendChild(st);
+  }
+
+  window.__shot = async function (scene) {
+    var win = w(), doc = win.document;
+    emojiFont();
+    await sleep(400);
+    if (!win.TL.Auth.signedIn()) win.TL.Auth.testSignIn({ uid: 'shot27', displayName: '재원', email: 'shot27@example.com' });
+    win.TL.App.openTrip(window.__tripId, 'schedule');
+    await sleep(450);
+
+    if (scene === 'schedule') {
+      win.TL.Dialogs.schedule(win.TL.Store.trip(window.__tripId), null, 'd2');
+      await sleep(420);
+      var q = doc.getElementById('pl_q');
+      if (q) {
+        q.value = '흰여울문화마을';
+        q.dispatchEvent(new win.Event('input', { bubbles: true }));
+        q.dispatchEvent(new win.Event('change', { bubbles: true }));
+      }
+      await sleep(420);
+      return 'schedule';
+    }
+    if (scene === 'banner') {
+      win.TL.App.notifyUpdate(null);
+      await sleep(400);
+      return 'banner';
+    }
+    if (scene === 'overview') {
+      win.TL.Actions['trip-overview']();
+      await sleep(500);
+      return 'overview';
+    }
+    if (scene === 'settle') {
+      win.TL.App.openTrip(window.__tripId, 'money');
+      await sleep(500);
+      var btn = doc.querySelector('[data-action="copy-settle"]');
+      if (btn) btn.scrollIntoView({ block: 'center' });
+      await sleep(300);
+      win.eval('TL.UI.copyAsync = function () { return Promise.resolve(true); }; TL.Actions["copy-settle"]();');
+      await sleep(350);
+      return 'settle';
+    }
+    if (scene === 'expense') {
+      var b = doc.querySelector('[data-action="exp-from-sched"]');
+      if (b) b.click();
+      await sleep(500);
+      return 'expense';
+    }
+    return 'none';
+  };
+  window.__state = function () {
+    var doc = w().document;
+    return {
+      title: doc.title,
+      modal: !!doc.querySelector('.modal'),
+      banner: !!doc.querySelector('#upd-banner'),
+      ovDays: doc.querySelectorAll('.ov-day').length,
+      titleValue: (doc.getElementById('f_title') || {}).value || ''
+    };
+  };
+  (async function () {
+    if (!(await waitReady())) { document.title = 'shot-error boot'; return; }
+    try {
+      var win = w();
+      var regs = await win.navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(function (r) { return r.unregister(); }));
+      var keys = await win.caches.keys();
+      await Promise.all(keys.filter(function (k) { return k.indexOf('triplog') === 0; }).map(function (k) { return win.caches.delete(k); }));
+    } catch (e) { /* 없으면 그냥 진행 */ }
+    f.src = '../qa/shot27/app.html?shot=27&cb=' + Date.now();
+    await sleep(400);
+    if (!(await waitReady())) { document.title = 'shot-error boot2'; return; }
+    await sleep(400);
+    seed();
+    await sleep(300);
+    window.__ready = true;
+    document.title = 'shot-ready';
+  })();
+})();
+</script>
+</body>
+</html>

@@ -627,6 +627,8 @@
     var copyText = w.eval('__copyText');
     ok(copyText === w.eval('TL.Core.settleText(TL.Store.trip(' + JSON.stringify(trip.id) + '), TL.Store.trip(' + JSON.stringify(trip.id) + ').data)'), '정산 복사 내용', (copyText || '').slice(0, 40));
     ok(copyText.indexOf('총지출') >= 0 && copyText.indexOf('→') >= 0, '정산 복사: 송금·총지출', (copyText || '').slice(0, 80));
+    ok(copyText.indexOf('정산 내역') >= 0 && copyText.indexOf('1인 평균') >= 0, 'v27: 정산 내역에 1인 평균', (copyText || '').slice(0, 60));
+    ok(/ → .+ : [0-9,]+원/.test(copyText || ''), 'v27: 송금 줄 형식(A → B : 0,000원)', (copyText || '').split('\n').slice(-2).join(' / '));
     ok(text('#toast').indexOf('복사했어요') >= 0, '정산 복사 안내', text('#toast'));
     // 복사가 막히면 직접 복사할 수 있게 보여 준다
     w.eval('TL.UI.copyAsync = function () { return Promise.resolve(false); };');
@@ -945,6 +947,39 @@
     ok(!!v26item, 'v26: 장소만 입력해도 일정이 저장됨', v26item && v26item.title);
     ok(v26item && v26item.time === '08:30', 'v26: 시간도 함께 저장', v26item && v26item.time);
     noOverflow('v26 일정 시트');
+
+    // v27: 전체 일정 보기 · 인쇄/PDF · 일정 → 지출 적기 · 새 버전 배너
+    ok(!!q('[data-action="trip-overview"]'), 'v27: 전체 일정 보기 버튼');
+    await click(q('[data-action="trip-overview"]'));
+    await sleep(300);
+    ok(!!q('.ov-wrap'), 'v27: 전체 일정 시트 열림');
+    ok(qa('.ov-day').length >= 1, 'v27: Day별로 묶어서 보여줌', qa('.ov-day').length);
+    ok(qa('.ov-row').length >= 2, 'v27: 여러 일정을 한 화면에', qa('.ov-row').length);
+    ok(!!q('[data-action="print-overview"]'), 'v27: 인쇄/PDF 저장 버튼');
+    noOverflow('전체 일정');
+    w.eval('window.__printed = 0; window.print = function () { window.__printed++; };');
+    await clickSel('[data-action="print-overview"]');
+    await sleep(220);
+    ok(w.eval('__printed') === 1, 'v27: 인쇄 실행(window.print)', w.eval('__printed'));
+    var paHtml = w.eval("((document.getElementById('print-area') || {}).innerHTML || '')");
+    ok(paHtml.length > 80 && paHtml.indexOf('ov-day') >= 0, 'v27: 인쇄용 영역에 전체 일정', paHtml.length);
+    await clickSel('[data-action="close-modal"]');
+    await sleep(160);
+    ok(!!q('[data-action="exp-from-sched"]'), 'v27: 일정 카드에 지출 적기 버튼');
+    await click(q('[data-action="exp-from-sched"]'));
+    await sleep(280);
+    ok(!!q('#f_amount'), 'v27: 일정에서 지출 시트 열림');
+    ok(!!q('#f_title') && q('#f_title').value.length > 0, 'v27: 일정 제목 미리 채움', q('#f_title') && q('#f_title').value);
+    await clickSel('[data-action="close-modal"]');
+    await sleep(160);
+    w.eval('TL.App.notifyUpdate(null);');
+    await sleep(220);
+    ok(!!q('#upd-banner'), 'v27: 새 버전 배너 표시');
+    ok(text('#upd-banner').indexOf('새 버전이 준비됐어요') >= 0, 'v27: 배너 문구', text('#upd-banner').slice(0, 40));
+    ok(!!q('#upd-go') && text('#upd-go').indexOf('새로고침') >= 0, 'v27: 새로고침 버튼');
+    await click(q('#upd-close'));
+    await sleep(120);
+    ok(!q('#upd-banner'), 'v27: 배너 닫기');
 
     /* ===== v20 회귀: 초대 링크로 다시 들어와도 지운 일정이 되살아나지 않는다 ===== */
     w.eval([

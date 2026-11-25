@@ -430,24 +430,76 @@
   });
 
   /* ------------------------------------------------------- 서비스 워커 */
+  /* v27: 새 버전이 준비되면 열린 화면 위에 배너를 띄우고, 눌러서 바로 적용한다 */
+  var swReg = null, updateShown = false, reloadWanted = false;
+
+  /** 배너 HTML (테스트에서도 같은 문구를 확인한다) */
+  App.updateNoticeHtml = function () {
+    return UI.updateBannerHtml();
+  };
+  /** 새 버전 배너를 화면에 띄운다 (한 번만) */
+  App.notifyUpdate = function (reg) {
+    if (reg) swReg = reg;
+    if (updateShown) return false;
+    updateShown = true;
+    try {
+      var el = document.getElementById('upd-banner');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'upd-banner';
+        el.className = 'upd-banner';
+        el.setAttribute('role', 'status');
+        el.innerHTML = App.updateNoticeHtml();
+        document.body.appendChild(el);
+        var go = document.getElementById('upd-go');
+        if (go && go.addEventListener) go.addEventListener('click', function () { App.applyUpdate(); });
+        var cls = document.getElementById('upd-close');
+        if (cls && cls.addEventListener) cls.addEventListener('click', function () {
+          if (el.parentNode) el.parentNode.removeChild(el);
+        });
+      }
+    } catch (e) { /* 사생활 보호 모드 등 */ }
+    return true;
+  };
+  /** 기다리는 새 서비스 워커가 있으면 넘겨받고, 없으면 그냥 새로고침 */
+  App.applyUpdate = function () {
+    reloadWanted = true;
+    var w = swReg && swReg.waiting;
+    if (w && w.postMessage) {
+      try { w.postMessage({ type: 'SKIP_WAITING' }); } catch (e) {}
+      setTimeout(function () { location.reload(); }, 1500);
+    } else {
+      location.reload();
+    }
+  };
+
   function registerSW() {
     if (!('serviceWorker' in navigator)) return;
     var https = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     if (!https) return;
     var autoTest = /[?&]qa=1/.test(location.search);   // 자동 테스트는 새로고침하지 않는다
     var hadController = !!navigator.serviceWorker.controller;
-    var reloaded = false;
     try {
-      // 새 서비스 워커(v23)가 화면을 넘겨받으면 한 번 새로고침해 최신 앱을 쓴다 (v20 캐시에 갖혀 초대 링크 차단을 못 하는 일 방지)
+      // v27: 새 서비스 워커가 화면을 넘겨받아도 바로 새로고침하지 않고 배너로 알린다 (작성 중인 내용 보호)
       navigator.serviceWorker.addEventListener('controllerchange', function () {
-        if (!hadController || reloaded || autoTest) return;
-        reloaded = true;
-        location.reload();
+        if (reloadWanted) { location.reload(); return; }
+        if (hadController && !autoTest) App.notifyUpdate(swReg);
       });
     } catch (e) {}
     try {
       navigator.serviceWorker.register('./sw.js').then(function (reg) {
+        swReg = reg;
         if (reg && reg.update) { try { reg.update(); } catch (e) {} }
+        if (reg && reg.addEventListener) {
+          reg.addEventListener('updatefound', function () {
+            var nw = reg.installing;
+            if (!nw || !nw.addEventListener) return;
+            nw.addEventListener('statechange', function () {
+              if (nw.state === 'installed' && navigator.serviceWorker.controller && !autoTest) App.notifyUpdate(reg);
+            });
+          });
+        }
+        if (reg && reg.waiting && hadController && !autoTest) App.notifyUpdate(reg);
       }).catch(function (e) {
         console.warn('[triplog] service worker', e);
       });

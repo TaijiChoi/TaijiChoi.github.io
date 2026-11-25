@@ -158,7 +158,7 @@
     html += '<div class="card pad mt16">' +
       '<div class="section-title"><h2>정산 (N/1)</h2>' +
       '<span class="row gap6"><span class="hint">' + (trip.members || []).length + '명 기준</span>' +
-        '<button class="btn xs btn-ghost" data-action="copy-settle">📋 정산 복사</button></span></div>';
+        '<button class="btn xs btn-ghost" data-action="copy-settle">📋 정산 내역 복사</button></span></div>';
     if (!(trip.members || []).length) {
       html += '<div class="empty-settle">일행을 먼저 등록해 주세요.</div>';
     } else {

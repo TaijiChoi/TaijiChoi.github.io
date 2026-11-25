@@ -263,6 +263,13 @@
     }
   };
   UI.refresh = function () { if (TL.App && TL.App.render) TL.App.render(); };
+  /** v27: 새 버전이 준비됐을 때 띄우는 배너 HTML (app.js가 화면에 붙인다) */
+  UI.updateBannerHtml = function () {
+    return '<span class="ub-ic">' + UI.icon('sparkle', 16) + '</span>' +
+      '<span class="ub-tx"><b>새 버전이 준비됐어요</b><small>새로고침하면 최신 화면으로 바뀌어요</small></span>' +
+      '<button type="button" class="btn xs btn-primary" id="upd-go">새로고침</button>' +
+      '<button type="button" class="icon-btn sm" id="upd-close" aria-label="나중에">' + UI.icon('close', 14) + '</button>';
+  };
 
   /* ------------------------------------------------------------ 권한(v20) */
   /** 로그인했는지 확인하고, 안 했으면 안내 토스트와 함께 로그인 시트를 연다 */
