@@ -455,72 +455,228 @@
   /* ============================================================== 일정 */
   function P() { return TL.Places || {}; }
 
-  /* ---- 시·분 고르기 (터치 한두 번) ---- */
-  var MIN_CHIPS = [0, 10, 15, 20, 30, 40, 45, 50];
-  function minuteText(m) { return (m < 10 ? '0' : '') + m; }
-  D.timePickHtml = function (value) {
-    var p = Core.timeParts(value);
-    var hasHour = p.hour != null;
-    var summary = hasHour ? Core.hourLabel(p.hour) + ' ' + p.minute + '분' : '시간 미정';
-    var html = '<div class="time-pick" id="time-pick">';
-    html += '<div class="tp-sum"><span class="tp-val" id="tp-val">' + UI.esc(summary) + '</span>' +
-      '<button type="button" class="btn xs btn-ghost" data-action="time-clear">미정</button></div>';
-    html += '<div class="tp-group"><span class="tp-label">시</span><div class="tp-chips tp-hours">';
-    for (var h = 0; h < 24; h++) {
-      html += '<button type="button" class="tp-chip' + (hasHour && p.hour === h ? ' active' : '') + '" ' +
-        'data-action="time-hour" data-h="' + h + '" aria-label="' + Core.hourLabel(h) + '시" ' +
-        'title="' + Core.hourLabel(h) + '">' + (h < 10 ? '0' : '') + h + '</button>';
-    }
-    html += '</div></div>';
-    html += '<div class="tp-group"><span class="tp-label">분</span><div class="tp-chips tp-mins">';
-    MIN_CHIPS.forEach(function (m) {
-      html += '<button type="button" class="tp-chip' + (hasHour && p.minute === m ? ' active' : '') + '" ' +
-        'data-action="time-min" data-m="' + m + '" aria-label="' + m + '분">' + minuteText(m) + '</button>';
-    });
-    html += '</div></div>';
-    html += '<input class="input tp-input" type="text" inputmode="numeric" id="f_time" maxlength="5" ' +
-      'placeholder="직접 입력 예: 09:30" value="' + UI.esc(value || '') + '">';
-    html += '<div class="hintline">시·분을 누르면 바로 채워져요. 직접 입력도 돼요(비우면 시간 미정).</div>';
-    html += '</div>';
-    return html;
+  /* ---- 카테고리: 폼 맨 위 라디오형 칩 (v25) ---- */
+  D.catPickHtml = function (selected) {
+    var cur = selected || 'sight';
+    return '<div class="cat-pick" id="cat-pick" role="radiogroup" aria-label="카테고리">' +
+      Core.SCHED_CATS.map(function (c) {
+        var on = c.key === cur;
+        return '<button type="button" class="cat-chip' + (on ? ' active' : '') + '" role="radio" aria-checked="' + (on ? 'true' : 'false') + '" ' +
+          'data-action="pick-sched-cat" data-cat="' + c.key + '" style="--cc:' + Core.catColor(c.key) + '">' +
+          '<span class="cc-ic">' + UI.icon(c.icon, 17) + '</span><span class="cc-tx">' + c.label + '</span></button>';
+      }).join('') + '</div>' +
+      '<input type="hidden" id="f_cat" value="' + UI.esc(cur) + '">';
   };
-  /** 칩·요약 문구를 현재 f_time 값에 맞춰 갱신 (입력 중에는 HTML을 갈아끼우지 않는다) */
+  D.syncCatPick = function () {
+    var v = UI.val('f_cat') || 'sight';
+    UI.$$('#cat-pick .cat-chip').forEach(function (b) {
+      var on = b.getAttribute('data-cat') === v;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+  };
+  A['pick-sched-cat'] = function (el) {
+    var key = el.getAttribute('data-cat') || 'sight';
+    var input = document.getElementById('f_cat');
+    if (input) input.value = key;
+    D.syncCatPick();
+  };
+
+  /* ---- 시간: 시계 버튼 → 오전/오후 · 시 · 분 휠 피커 (v25) ----
+     f_time(hidden text)이 값의 본체이고, 버튼 요약(tp-val)·휠·미리보기는 거기에 맞춰 그린다. */
+  var TP_ITEM = 40;                                   // 휠 한 칸 높이(px) — CSS .tp-wi 와 같다
+  var tps = { open: false, backup: '', auto: false, hintBackup: '' };
+  function tpPad(m) { return (m < 10 ? '0' : '') + m; }
+  function tpWheel(col) { return document.getElementById('w-' + col); }
+  function tpIdx(wheel) {
+    var n = wheel && wheel.children ? wheel.children.length : 0;
+    if (!n) return 0;
+    var i = Math.round((wheel.scrollTop || 0) / TP_ITEM);
+    return i < 0 ? 0 : (i > n - 1 ? n - 1 : i);
+  }
+  function tpScrollTo(wheel, idx) {
+    if (!wheel) return;
+    var top = Math.max(0, idx) * TP_ITEM;
+    try { wheel.scrollTop = top; } catch (e) { /* 스텁/미지원 */ }
+  }
+  function tpHour12(hour) { return hour % 12 === 0 ? 12 : hour % 12; }
+  /** 시간 팝오버(휠) HTML — 등록/수정 시트 안에 숨은 채로 들어간다 */
+  D.timePopHtml = function (value) {
+    var p = Core.timeParts(value);
+    var has = p.hour != null;
+    var h12 = has ? tpHour12(p.hour) : 9;
+    var ap = has && p.hour >= 12 ? 'pm' : 'am';
+    var mi = has ? p.minute : 0;
+    var hours = '', mins = '';
+    for (var h = 1; h <= 12; h++) {
+      hours += '<button type="button" class="tp-wi' + (h === h12 ? ' on' : '') + '" data-action="time-h" data-h="' + h + '">' + h + '</button>';
+    }
+    for (var m = 0; m < 60; m++) {
+      mins += '<button type="button" class="tp-wi' + (m === mi ? ' on' : '') + '" data-action="time-m" data-m="' + m + '">' + tpPad(m) + '</button>';
+    }
+    return '<div class="tp-pop hide" id="tp-pop">' +
+      '<div class="tp-pop-bg" data-action="time-cancel"></div>' +
+      '<div class="tp-card" role="dialog" aria-modal="true" aria-label="시간 고르기">' +
+        '<div class="tp-head"><b>시간</b>' +
+          '<button type="button" class="btn xs btn-ghost" data-action="time-clear">미정</button></div>' +
+        '<div class="tp-ampm" id="tp-ampm">' +
+          '<button type="button" class="tp-ap' + (ap === 'am' ? ' active' : '') + '" data-action="time-ampm" data-v="am">오전</button>' +
+          '<button type="button" class="tp-ap' + (ap === 'pm' ? ' active' : '') + '" data-action="time-ampm" data-v="pm">오후</button>' +
+        '</div>' +
+        '<div class="tp-wheels">' +
+          '<span class="tp-band" aria-hidden="true"></span>' +
+          '<div class="tp-wheel" id="w-hour" role="listbox" aria-label="시">' + hours + '</div>' +
+          '<span class="tp-colon">:</span>' +
+          '<div class="tp-wheel" id="w-min" role="listbox" aria-label="분">' + mins + '</div>' +
+        '</div>' +
+        '<div class="tp-preview" id="tp-preview">' + UI.esc(Core.timeLabel(value)) + '</div>' +
+        '<div class="tp-direct"><span>직접 입력</span>' +
+          '<input class="input tp-input" type="text" inputmode="numeric" id="f_time" maxlength="5" ' +
+          'placeholder="09:30" value="' + UI.esc(value || '') + '" aria-label="시간 직접 입력">' +
+        '</div>' +
+        '<div class="tp-foot">' +
+          '<button type="button" class="btn btn-ghost" data-action="time-cancel">취소</button>' +
+          '<button type="button" class="btn btn-primary" data-action="time-done">확인</button>' +
+        '</div>' +
+      '</div></div>';
+  };
+  /** 시간 입력 줄: 시계 버튼(요약) + 숨은 휠 피커 */
+  D.timePickHtml = function (value, opts) {
+    opts = opts || {};
+    var auto = !!opts.auto;
+    return '<div class="time-pick' + (auto ? ' is-auto' : '') + '" id="time-pick">' +
+      '<button type="button" class="tp-open" id="tp-open" data-action="time-open" aria-haspopup="dialog" aria-expanded="false">' +
+        '<span class="tp-clock">' + UI.icon('clock', 21) + '</span>' +
+        '<span class="tp-text"><span class="tp-val" id="tp-val">' + UI.esc(Core.timeLabel(value)) + '</span>' +
+          (auto ? '<span class="tp-auto" id="tp-auto">앞 일정 +1시간</span>' : '') + '</span>' +
+        '<span class="tp-caret">' + UI.icon('down', 15) + '</span>' +
+      '</button>' +
+      '<div class="hintline" id="tp-hint">' + (auto
+        ? '이 날 마지막 일정 다음 시간으로 맞춰 뒀어요. 시계를 눌러 바꿀 수 있어요.'
+        : '시계를 눌러 오전·오후와 시·분을 고르세요.') + '</div>' +
+      D.timePopHtml(value) +
+      '</div>';
+  };
+  /** 시계 버튼·휠·요약을 현재 f_time 값에 맞춰 갱신 */
   D.syncTimePick = function () {
     var val = UI.val('f_time');
     var p = Core.timeParts(val);
+    var has = p.hour != null;
+    var label = Core.timeLabel(val);
     var sum = document.getElementById('tp-val');
-    if (sum) sum.textContent = p.hour != null ? Core.hourLabel(p.hour) + ' ' + p.minute + '분' : '시간 미정';
-    var hours = document.querySelectorAll('.tp-hours .tp-chip');
-    for (var i = 0; i < hours.length; i++) {
-      var h = Number(hours[i].getAttribute('data-h'));
-      if (p.hour != null && h === p.hour) hours[i].classList.add('active');
-      else hours[i].classList.remove('active');
-    }
-    var mins = document.querySelectorAll('.tp-mins .tp-chip');
-    for (var j = 0; j < mins.length; j++) {
-      var m = Number(mins[j].getAttribute('data-m'));
-      if (p.hour != null && m === p.minute) mins[j].classList.add('active');
-      else mins[j].classList.remove('active');
-    }
+    if (sum) sum.textContent = label;
+    var pv = document.getElementById('tp-preview');
+    if (pv) pv.textContent = label;
+    var h12 = has ? tpHour12(p.hour) : 9;
+    var ap = has && p.hour >= 12 ? 'pm' : 'am';
+    var mi = has ? p.minute : 0;
+    UI.$$('#tp-ampm .tp-ap').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-v') === ap); });
+    UI.$$('#w-hour .tp-wi').forEach(function (b) { b.classList.toggle('on', Number(b.getAttribute('data-h')) === h12); });
+    UI.$$('#w-min .tp-wi').forEach(function (b) { b.classList.toggle('on', Number(b.getAttribute('data-m')) === mi); });
   };
   function setTimeValue(t) {
     var el = document.getElementById('f_time');
     if (el) el.value = t;
     D.syncTimePick();
   }
-  A['time-hour'] = function (el) {
-    var h = Number(el.getAttribute('data-h'));
-    var p = Core.timeParts(UI.val('f_time'));
-    var m = p.hour == null ? 0 : p.minute;
-    setTimeValue(Core.makeTime(h, m));
+  /** 직접 고르면 '자동' 배지를 내린다 */
+  D.markTimeManual = function () {
+    if (dlg && dlg.kind === 'schedule') dlg.timeAuto = false;
+    var badge = document.getElementById('tp-auto');
+    if (badge) badge.classList.add('hide');
+    var hint = document.getElementById('tp-hint');
+    if (hint) hint.textContent = '시계를 눌러 오전·오후와 시·분을 고르세요.';
   };
-  A['time-min'] = function (el) {
-    var m = Number(el.getAttribute('data-m'));
+  function tpCenter(value) {
+    var p = Core.timeParts(value);
+    var h12 = p.hour != null ? tpHour12(p.hour) : 9;
+    var mi = p.hour != null ? p.minute : 0;
+    tpScrollTo(tpWheel('hour'), h12 - 1);
+    tpScrollTo(tpWheel('min'), mi);
+  }
+  /** 휠을 굴려 멈춘 자리의 값으로 f_time을 바꾼다 */
+  function tpOnScroll() {
+    if (!tps.open) return;
+    var wh = tpWheel('hour'), wm = tpWheel('min');
+    if (!wh || !wm || !wh.children || !wh.children.length) return;
     var p = Core.timeParts(UI.val('f_time'));
-    var h = p.hour == null ? 9 : p.hour;   // 분만 골랐으면 오전 9시부터
-    setTimeValue(Core.makeTime(h, m));
+    var h12 = tpIdx(wh) + 1;
+    var mi = tpIdx(wm);
+    var ap = p.hour != null && p.hour >= 12 ? 'pm' : 'am';
+    var t = Core.makeTime((h12 % 12) + (ap === 'pm' ? 12 : 0), mi);
+    if (!t || t === UI.val('f_time')) return;
+    var el = document.getElementById('f_time');
+    if (el) el.value = t;
+    D.markTimeManual();
+    D.syncTimePick();
+  }
+  function tpBind() {
+    ['hour', 'min'].forEach(function (col) {
+      var w = tpWheel(col);
+      if (!w || !w.addEventListener || w._tpBound) return;
+      w._tpBound = 1;
+      var timer = null;
+      w.addEventListener('scroll', function () {
+        clearTimeout(timer);
+        timer = setTimeout(tpOnScroll, 90);
+      }, { passive: true });
+    });
+  }
+  function tpSet(hour, minute) {
+    setTimeValue(Core.makeTime(hour, minute));
+    D.markTimeManual();
+    if (tps.open) tpCenter(Core.makeTime(hour, minute));
+  }
+  A['time-open'] = function () {
+    var pop = document.getElementById('tp-pop');
+    if (!pop) return;
+    var cur = UI.val('f_time');
+    tps.open = true;
+    tps.backup = cur;
+    tps.auto = !!(dlg && dlg.timeAuto);
+    var hint = document.getElementById('tp-hint');
+    tps.hintBackup = hint ? hint.textContent : '';
+    pop.classList.remove('hide');
+    var btn = document.getElementById('tp-open');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    D.syncTimePick();
+    tpCenter(cur);
+    setTimeout(function () { if (tps.open) tpCenter(UI.val('f_time')); }, 40);
+    tpBind();
   };
-  A['time-clear'] = function () { setTimeValue(''); };
+  function tpClose(keep) {
+    var pop = document.getElementById('tp-pop');
+    if (pop) pop.classList.add('hide');
+    var btn = document.getElementById('tp-open');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+    tps.open = false;
+    if (keep) return;
+    setTimeValue(tps.backup);
+    if (dlg && dlg.kind === 'schedule') dlg.timeAuto = tps.auto;
+    var badge = document.getElementById('tp-auto');
+    if (badge) badge.classList.toggle('hide', !tps.auto);
+    var hint = document.getElementById('tp-hint');
+    if (hint && tps.hintBackup) hint.textContent = tps.hintBackup;
+  }
+  A['time-done'] = function () { tpClose(true); };
+  A['time-cancel'] = function () { tpClose(false); };
+  A['time-clear'] = function () { setTimeValue(''); D.markTimeManual(); };
+  A['time-ampm'] = function (el) {
+    var p = Core.timeParts(UI.val('f_time'));
+    var h12 = p.hour != null ? tpHour12(p.hour) : 9;
+    var pm = el.getAttribute('data-v') === 'pm';
+    tpSet((h12 % 12) + (pm ? 12 : 0), p.hour != null ? p.minute : 0);
+  };
+  A['time-h'] = function (el) {
+    var h12 = Number(el.getAttribute('data-h')) || 12;
+    var p = Core.timeParts(UI.val('f_time'));
+    var pm = p.hour != null && p.hour >= 12;
+    tpSet((h12 % 12) + (pm ? 12 : 0), p.hour != null ? p.minute : 0);
+  };
+  A['time-m'] = function (el) {
+    var p = Core.timeParts(UI.val('f_time'));
+    tpSet(p.hour != null ? p.hour : 9, Number(el.getAttribute('data-m')) || 0);
+  };   // 분만 골랐으면 오전 9시부터
 
   function srcLabel(src) {
     return src === 'osm' ? 'OSM' : src === 'kakao' ? '카카오' : src === 'map' ? '지도' : src === 'coord' ? '좌표' : '직접';
@@ -613,22 +769,22 @@
     };
     D.trip = trip;
     var day = item ? item.dayKey : (dayKey || TL.App.view.day || 'd1');
+    /* 새 일정: 이 날 마지막 일정 + 1시간 (없으면 09:00). 수정: 저장된 시간 그대로 */
+    var autoTime = item ? '' : Core.nextScheduleTime(trip.data && trip.data.schedules, day);
+    if (item) dlg.timeAuto = false; else dlg.timeAuto = true;
     var html = '';
-    html += placeBoxHtml(dlg.picked);
-    html += coordBoxHtml(dlg.picked);
+    html += '<div class="form-row"><label class="fl">카테고리</label>' + D.catPickHtml(item ? item.category : 'sight') + '</div>';
+    html += '<div class="form-row"><label class="fl">일정 이름</label>' +
+      '<input class="input" id="f_title" placeholder="예: 도톤보리 산책" maxlength="60" value="' + UI.esc(item ? item.title : '') + '"></div>';
     html += '<div class="form-row"><label class="fl">날짜</label><select class="input" id="f_day">' +
       Core.dayList(trip).map(function (d) {
         return '<option value="' + d.key + '"' + (d.key === day ? ' selected' : '') + '>' + d.label +
           (d.date ? ' · ' + Core.isoLabel(d.date) : ' (출발 전)') + '</option>';
       }).join('') + '</select></div>';
     html += '<div class="form-row"><label class="fl">시간 <span style="font-weight:500">(선택)</span></label>' +
-      D.timePickHtml(item && item.time || '') + '</div>';
-    html += '<div class="form-row"><label class="fl">카테고리</label><select class="input" id="f_cat">' +
-      Core.SCHED_CATS.map(function (c) {
-        return '<option value="' + c.key + '"' + (item && item.category === c.key ? ' selected' : '') + '>' + c.label + '</option>';
-      }).join('') + '</select></div>';
-    html += '<div class="form-row"><label class="fl">일정 이름</label>' +
-      '<input class="input" id="f_title" placeholder="예: 도톤보리 산책" maxlength="60" value="' + UI.esc(item ? item.title : '') + '"></div>';
+      D.timePickHtml(item ? (item.time || '') : autoTime, { auto: !item }) + '</div>';
+    html += placeBoxHtml(dlg.picked);
+    html += coordBoxHtml(dlg.picked);
     html += '<div class="form-row"><label class="fl">지도에 검색할 장소명 <span style="font-weight:500">(선택)</span></label>' +
       '<input class="input" id="f_place" placeholder="비우면 위 이름으로 검색해요" maxlength="60" value="' + UI.esc(item ? (item.place || '') : '') + '"></div>';
     html += '<div class="form-row"><label class="fl">메모</label>' +
@@ -649,6 +805,14 @@
       (item ? '<button class="btn btn-danger" data-action="del-schedule" data-id="' + UI.esc(item.id) + '">삭제</button>' : '') +
       '<button class="btn btn-primary" data-action="save-schedule">' + (item ? '저장' : '추가') + '</button></div>';
     open(html, item ? '일정 수정' : '일정 추가');
+  };
+  /** 날짜를 바꾸면 그 날 기준으로 기본 시간을 다시 고른다 (직접 고른 뒤에는 그대로 둔다) */
+  D.autoTimeForDay = function () {
+    if (!dlg || dlg.kind !== 'schedule' || dlg.id || !dlg.timeAuto) return;
+    var tag = dlg.trip && dlg.trip.data && dlg.trip.data.schedules;
+    setTimeValue(Core.nextScheduleTime(tag, UI.val('f_day')));
+    var badge = document.getElementById('tp-auto');
+    if (badge) badge.classList.remove('hide');
   };
 
   A['pl-mode'] = function (el) {

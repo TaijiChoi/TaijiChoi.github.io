@@ -149,6 +149,26 @@
     if (h < 12) return '오전 ' + (h === 0 ? 12 : h);
     return '오후 ' + (h === 12 ? 12 : h - 12);
   };
+  /** 시간 표시 문구: '오후 2 30분' / '시간 미정' */
+  Core.timeLabel = function (v) {
+    var p = Core.timeParts(v);
+    return p.hour == null ? '시간 미정' : Core.hourLabel(p.hour) + ' ' + p.minute + '분';
+  };
+  /** 그 날 마지막 일정 + 1시간을 기본 시간으로 (일정이 없으면 09:00, 23:30을 넘지 않는다) */
+  Core.nextScheduleTime = function (schedules, dayKey) {
+    var latest = -1;
+    (schedules || []).forEach(function (s) {
+      if (!s || (dayKey && s.dayKey !== dayKey)) return;
+      var p = Core.timeParts(s.time);
+      if (p.hour == null) return;
+      var mins = p.hour * 60 + p.minute;
+      if (mins > latest) latest = mins;
+    });
+    var base = latest >= 0 ? latest + 60 : 9 * 60;
+    var cap = 23 * 60 + 30;
+    if (base > cap) base = cap;
+    return Core.makeTime(Math.floor(base / 60), base % 60);
+  };
   /** '930' → '09:30', '14:5' → '14:05', 빈 값은 '' */
   Core.normTime = function (v) {
     var s = String(v == null ? '' : v).trim();

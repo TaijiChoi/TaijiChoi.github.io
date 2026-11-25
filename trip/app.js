@@ -299,7 +299,10 @@
       if (TL.Dialogs.resetRateManual) TL.Dialogs.resetRateManual();
       TL.Dialogs.updateExpensePreview();
       if (cur !== 'KRW' && TL.Dialogs.autoRate) TL.Dialogs.autoRate(cur);
+    } else if (id === 'f_day') {
+      if (TL.Dialogs.autoTimeForDay) TL.Dialogs.autoTimeForDay();
     } else if (id === 'f_time') {
+      if (TL.Dialogs.markTimeManual) TL.Dialogs.markTimeManual();
       if (TL.Dialogs.syncTimePick) TL.Dialogs.syncTimePick();
     } else if (id === 'f_amount' || id === 'f_rate' || id === 'f_charged') {
       if (id === 'f_rate' && TL.Dialogs.markRateManual) TL.Dialogs.markRateManual();

@@ -761,19 +761,62 @@ body.dragging{user-select:none;-webkit-user-select:none}
 .merge-list .grow b{font-size:13.5px}
 .merge-list small{font-size:11.5px;color:var(--sub)}
 
-/* ============================================================ v20
-   일정 시간 시·분 고르기 · 방장 전용 안내 · 로그인 안내 */
-.time-pick{border:1px solid var(--line);border-radius:14px;padding:10px 11px;background:#FBFCFE}
-.tp-sum{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
-.tp-val{font-weight:800;font-size:14px;color:var(--blue-d);letter-spacing:-.2px}
-.tp-group{display:flex;align-items:flex-start;gap:7px;margin-top:6px}
-.tp-label{flex:none;width:14px;padding-top:7px;font-size:11px;font-weight:700;color:var(--sub-2)}
-.tp-chips{display:flex;flex-wrap:wrap;gap:4px;flex:1;min-width:0}
-.tp-chip{height:30px;min-width:30px;padding:0 5px;border-radius:8px;border:1px solid var(--line);background:#fff;
-  font-size:12.5px;font-weight:650;color:var(--ink-2);font-variant-numeric:tabular-nums;line-height:1}
-.tp-chip:active{background:#EEF4FF}
-.tp-chip.active{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 2px 6px rgba(54,143,255,.28)}
-.tp-input{margin-top:9px;height:40px;text-align:center;letter-spacing:2px;font-weight:700}
+/* ============================================================ v25
+   일정 시트: 카테고리 라디오 칩(맨 위) · 시계 버튼·휠 피커 · 자동 기본 시간 */
+.cat-pick{display:flex;gap:6px;overflow-x:auto;padding:2px 0 5px;margin:0 -2px;scrollbar-width:none}
+.cat-pick::-webkit-scrollbar{display:none}
+.cat-chip{flex:none;display:inline-flex;align-items:center;gap:5px;height:36px;padding:0 11px;border-radius:11px;
+  border:1px solid var(--line);background:#fff;color:var(--ink-2);font-size:12.5px;font-weight:700;letter-spacing:-.2px;
+  transition:background .12s ease,border-color .12s ease,color .12s ease}
+.cat-chip .cc-ic{display:inline-flex;color:var(--cc,var(--blue))}
+.cat-chip .cc-tx{white-space:nowrap}
+.cat-chip:active{background:#F3F7FF}
+.cat-chip.active{border-color:var(--cc,var(--blue));background:var(--cc,var(--blue));color:#fff;box-shadow:0 3px 9px rgba(54,143,255,.22)}
+.cat-chip.active .cc-ic{color:#fff}
+
+.time-pick{display:flex;flex-direction:column;gap:5px}
+.tp-open{display:flex;align-items:center;gap:10px;width:100%;height:54px;padding:0 13px;border-radius:14px;
+  border:1px solid var(--line);background:#fff;text-align:left}
+.tp-open:active{background:#F3F7FF}
+.tp-clock{flex:none;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:11px;
+  background:var(--blue-l);color:var(--blue-d)}
+.time-pick.is-auto .tp-clock{background:var(--mint-l);color:#0B8C7B}
+.tp-text{flex:1;min-width:0;display:flex;align-items:center;gap:7px}
+.tp-val{font-weight:800;font-size:15px;letter-spacing:-.3px;color:var(--ink);font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tp-auto{flex:none;height:19px;padding:0 7px;border-radius:6px;background:var(--mint-l);color:#0B8C7B;
+  font-size:10.5px;font-weight:800;line-height:19px;white-space:nowrap}
+.tp-auto.hide{display:none}
+.tp-caret{flex:none;color:var(--sub-2)}
+.tp-pop{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-end;justify-content:center}
+.tp-pop.hide{display:none}
+.tp-pop-bg{position:absolute;inset:0;background:rgba(17,24,39,.42)}
+.tp-card{position:relative;width:100%;max-width:560px;background:#fff;border-radius:20px 20px 0 0;
+  padding:16px 18px calc(16px + var(--safe-b));box-shadow:0 -10px 40px rgba(17,24,39,.22);animation:tpUp .18s ease}
+@keyframes tpUp{from{transform:translateY(16px);opacity:.55}to{transform:none;opacity:1}}
+.tp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.tp-head b{font-size:16px;font-weight:800;letter-spacing:-.3px}
+.tp-ampm{display:flex;gap:6px;background:#F1F4FA;border-radius:12px;padding:3px}
+.tp-ap{flex:1;height:38px;border:0;border-radius:9px;background:transparent;font-weight:800;font-size:14px;color:var(--sub)}
+.tp-ap.active{background:#fff;color:var(--blue-d);box-shadow:0 2px 6px rgba(17,24,39,.10)}
+.tp-wheels{position:relative;display:flex;align-items:center;justify-content:center;gap:2px;height:200px;margin-top:10px;
+  overflow:hidden;border-radius:14px;background:#FBFCFE;border:1px solid var(--line)}
+.tp-wheel{position:relative;z-index:1;height:200px;width:92px;overflow-y:auto;scroll-snap-type:y mandatory;
+  -webkit-overflow-scrolling:touch;scrollbar-width:none;text-align:center;overscroll-behavior:contain}
+.tp-wheel::-webkit-scrollbar{display:none}
+.tp-wheel::before,.tp-wheel::after{content:"";display:block;height:80px}
+.tp-wi{display:block;width:100%;height:40px;border:0;background:transparent;font-size:19px;font-weight:700;color:#9AA3B2;
+  scroll-snap-align:center;font-variant-numeric:tabular-nums;letter-spacing:-.3px;line-height:40px}
+.tp-wi.on{color:var(--ink)}
+.tp-band{position:absolute;left:14px;right:14px;top:80px;height:40px;border-radius:10px;background:var(--blue-l);
+  border-top:1px solid #CFE0FF;border-bottom:1px solid #CFE0FF;pointer-events:none}
+.tp-colon{position:relative;z-index:1;font-size:20px;font-weight:800;color:var(--sub-2)}
+.tp-preview{margin-top:10px;text-align:center;font-size:13px;font-weight:800;color:var(--blue-d)}
+.tp-direct{display:flex;align-items:center;gap:8px;margin-top:10px}
+.tp-direct span{flex:none;font-size:11.5px;color:var(--sub-2);font-weight:700}
+.tp-input{height:40px;flex:1;text-align:center;letter-spacing:2px;font-weight:700}
+.tp-foot{display:flex;gap:8px;margin-top:14px}
+.tp-foot .btn{flex:1}
 .lock-note{display:flex;align-items:flex-start;gap:8px;margin-top:12px;padding:11px 12px;border-radius:13px;
   background:#FFF7ED;border:1px solid #FDE2C3;color:#8A4B0C;font-size:12.5px;line-height:1.5}
 .lock-note svg{flex:none;margin-top:1px}
