@@ -3,7 +3,7 @@
    · index.html의 ?v= 값과 아래 VERSION을 함께 올린다 (deploy 전 확인: tests/run.py)
    · 같은 버전 안에서 앱 파일만 고쳐 다시 배포할 때는 아래 BUILD 주석을 바꿔 새 서비스워커를 받게 한다
      (스크립트가 바이트까지 같으면 브라우저가 갱신을 건너뛰고 예전 캐시를 계속 쓴다)
-   · BUILD: 25a — v25 일정 시트 카테고리 라디오 칩·시계 휠 피커·자동 기본 시간 */
+   · BUILD: 25b — 카테고리 칩 두 줄 배치 */
 var VERSION = '25';
 var CACHE = 'triplog-v' + VERSION;
 var ASSETS = [
