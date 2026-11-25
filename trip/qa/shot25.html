@@ -64,6 +64,10 @@
     var open = doc.querySelector('[data-action="time-open"]');
     if (open) open.click();
     await sleep(500);
+    /* 시계 버튼(자동 15:30)도 함께 보이게 시트를 조금 올린다 */
+    var body = doc.querySelector('.sheet-body');
+    if (body) body.scrollTop = 104;
+    await sleep(300);
     return true;
   };
   window.__state = function () {
