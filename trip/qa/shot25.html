@@ -80,7 +80,18 @@
   };
   (async function () {
     if (!(await waitReady())) { document.title = 'shot-error boot'; return; }
-    await sleep(200);
+    /* 이전 방문의 서비스 워커·캐시가 예전 CSS를 물고 오지 않게 지우고 한 번 새로 연다 */
+    try {
+      var win = w();
+      var regs = await win.navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(function (r) { return r.unregister(); }));
+      var keys = await win.caches.keys();
+      await Promise.all(keys.filter(function (k) { return k.indexOf('triplog') === 0; }).map(function (k) { return win.caches.delete(k); }));
+    } catch (e) { /* 없으면 그냥 진행 */ }
+    f.src = '../index.html?shot=25&cb=' + Date.now();
+    await sleep(400);
+    if (!(await waitReady())) { document.title = 'shot-error boot2'; return; }
+    await sleep(400);
     seed();
     await sleep(300);
     window.__ready = true;
