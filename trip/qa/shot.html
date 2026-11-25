@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>트립로그 화면 캡처</title>
+<style>
+  body{margin:0;padding:16px;background:#0F172A;display:flex;gap:18px;align-items:flex-start;font-family:sans-serif;color:#fff}
+  figure{margin:0}
+  iframe{width:390px;height:844px;border:0;border-radius:16px;background:#fff;display:block}
+  figcaption{font-size:12px;padding:6px 2px;color:#9FB3D0}
+</style>
+</head>
+<body>
+<figure><iframe id="f1" title="일정과 하루 동선 지도" src="../index.html"></iframe><figcaption>일정 · 하루 동선 지도</figcaption></figure>
+<figure><iframe id="f2" title="예약 보관함과 일정 초안" src="../index.html"></iframe><figcaption>예약 보관함</figcaption></figure>
+<figure><iframe id="f3" title="지출과 자동 환율 실청구액" src="../index.html"></iframe><figcaption>지출 · 자동 환율/실청구액</figcaption></figure>
+<script>
+(function () {
+  'use strict';
+  function ready(f) {
+    try { var w = f.contentWindow; return !!(w && w.TL && w.TL.Store && w.TL.App && w.TL.App.openTrip && w.document.getElementById('screen')); } catch (e) { return false; }
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  async function waitReady(f) {
+    for (var i = 0; i < 100; i++) { if (ready(f)) return true; await sleep(80); }
+    return false;
+  }
+  function loadFrame(f, src) {
+    return new Promise(function (res) {
+      var done = false;
+      function on() { if (done) return; done = true; f.removeEventListener('load', on); setTimeout(res, 120); }
+      f.addEventListener('load', on);
+      f.src = src;
+      setTimeout(on, 9000);
+    });
+  }
+  const RES = '[항공] 대한항공 KE721\n2026년 12월 5일 09:20 인천국제공항 → 간사이국제공항 11:10\n예약번호: ABC123\n\n' +
+    '[숙소] 난바 스테이 호텔\n체크인 2026-12-05 15:00\n체크아웃 2026-12-08 11:00\n예약번호 NMB-7788';
+
+  async function main() {
+    var f1 = document.getElementById('f1');
+    await waitReady(f1);
+    var w = f1.contentWindow, S = w.TL.Store, C = w.TL.Core;
+    w.localStorage.clear();
+    await sleep(120);
+    // 예시 데이터를 덮어쓰지 않고 새 여행 추가
+    var t = S.createTrip({ name: '오사카 3박 4일', destination: '오사카 · 교토', startDate: '2026-12-05', endDate: '2026-12-08', members: [{ id: 'm1', name: '재원' }, { id: 'm2', name: '아내' }, { id: 'm3', name: '아들' }] });
+    [['10:00', '오사카성', 'sight', '오사카성', 34.6873, 135.5259, '大阪城'],
+     ['12:30', '구로몬 시장', 'food', '구로몬 시장', 34.6650, 135.5060, '黒門市場'],
+     ['15:00', '신사이바시', 'shop', '신사이바시', 34.6738, 135.5012, '心斎橋'],
+     ['19:00', '우메다 공중정원', 'sight', '우메다 스카이빌딩', 34.7055, 135.4903, '梅田スカイビル']
+    ].forEach(function (a) {
+      S.add(t.id, 'schedules', { dayKey: 'd2', time: a[0], title: a[1], category: a[2], place: a[3], lat: a[4], lng: a[5], source: 'kakao', address: a[6] });
+    });
+    S.add(t.id, 'expenses', { dayKey: 'd2', title: '이치란 라멘', amount: 3900, currency: 'JPY', rate: 9.43, chargedKRW: 36900, category: 'food', payerId: 'm1', sharedWith: ['m1', 'm2', 'm3'] });
+    S.add(t.id, 'expenses', { dayKey: 'd2', title: '오사카성 입장', amount: 1800, currency: 'JPY', rate: 9.43, category: 'ticket', payerId: 'm2', sharedWith: ['m1', 'm2', 'm3'] });
+    S.add(t.id, 'expenses', { dayKey: 'd2', title: '기념품', amount: 3200, currency: 'JPY', rate: 9.43, category: 'shop', payerId: 'm1', sharedWith: ['m1', 'm2', 'm3'] });
+
+    w.TL.App.openTrip(t.id, 'schedule');
+    w.TL.App.view.day = 'd2';
+    w.TL.App.view.mapOpen = true;
+    w.TL.App.render();
+
+    var f2 = document.getElementById('f2'), f3 = document.getElementById('f3');
+    // 시드 데이터를 읽도록 두 프레임을 새로 연다
+    var stamp = Date.now();
+    await loadFrame(f2, '../index.html?shot=2&t=' + stamp);
+    await loadFrame(f3, '../index.html?shot=3&t=' + stamp);
+    await waitReady(f2);
+    await waitReady(f3);
+    await sleep(200);
+    var w2 = f2.contentWindow, w3 = f3.contentWindow;
+    w2.TL.App.openTrip(t.id, 'schedule');
+    w2.TL.App.view.day = 'd2';
+    w2.TL.App.render();
+    w2.TL.Reserve.open(w2.TL.Store.trip(t.id));
+    var ta2 = w2.document.getElementById('res-text');
+    if (ta2) { ta2.value = RES; ta2.dispatchEvent(new w2.Event('input', { bubbles: true })); }
+    w2.TL.Actions['res-parse']();
+
+    w3.TL.App.openTrip(t.id, 'money');
+    w3.TL.Dialogs.expense(w3.TL.Store.trip(t.id), null);
+    var cur = w3.document.getElementById('f_currency');
+    if (cur) { cur.value = 'JPY'; cur.dispatchEvent(new w3.Event('change', { bubbles: true })); }
+    await sleep(1600);
+    var amt = w3.document.getElementById('f_amount');
+    if (amt) { amt.value = '3900'; amt.dispatchEvent(new w3.Event('input', { bubbles: true })); }
+    var ti = w3.document.getElementById('f_title');
+    if (ti) { ti.value = '이치란 라멘'; }
+    var ch = w3.document.getElementById('f_charged');
+    if (ch) { ch.value = '36900'; }
+    w3.TL.Actions['toggle-charged']({ classList: { toggle: function () {}, add: function () {}, remove: function () {} } });
+    window.__READY = true;
+  }
+  main().catch(function (e) { window.__ERR = String(e && e.stack || e); });
+})();
+</script>
+</body>
+</html>

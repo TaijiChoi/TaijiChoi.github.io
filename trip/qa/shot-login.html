@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>트립로그 v18 로그인 화면 캡처</title>
+<style>
+  body{margin:0;padding:16px;background:#0F172A;display:flex;gap:18px;align-items:flex-start;font-family:sans-serif;color:#fff}
+  figure{margin:0}
+  iframe{width:390px;height:844px;border:0;border-radius:16px;background:#fff;display:block}
+  figcaption{font-size:12px;padding:7px 2px;color:#9FB3D0}
+</style>
+</head>
+<body>
+<figure><iframe id="f1" title="로그인한 홈" src="../index.html?shot=login1"></iframe><figcaption>로그인한 홈 · 계정 배지</figcaption></figure>
+<figure><iframe id="f2" title="계정 로그인 시트" src="../index.html?shot=login2"></iframe><figcaption>계정 로그인 · Google / 이메일</figcaption></figure>
+<script>
+(function () {
+  'use strict';
+  function ready(f) {
+    try { var w = f.contentWindow; return !!(w && w.TL && w.TL.Store && w.TL.App && w.document.getElementById('screen')); } catch (e) { return false; }
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  async function waitReady(f) {
+    for (var i = 0; i < 120; i++) { if (ready(f)) return true; await sleep(80); }
+    return false;
+  }
+  function loadFrame(f, src) {
+    return new Promise(function (res) {
+      var done = false;
+      function on() { if (done) return; done = true; f.removeEventListener('load', on); setTimeout(res, 150); }
+      f.addEventListener('load', on);
+      f.src = src;
+      setTimeout(on, 9000);
+    });
+  }
+  async function main() {
+    var f1 = document.getElementById('f1');
+    await waitReady(f1);
+    f1.contentWindow.localStorage.clear();
+    await loadFrame(f1, '../index.html?shot=login1&t=' + Date.now());
+    await waitReady(f1);
+    var w1 = f1.contentWindow, S1 = w1.TL.Store;
+    S1.clearAll();
+    var t = S1.createTrip({
+      name: '오사카 3박 4일', destination: '오사카 · 교토', startDate: '2026-12-05', endDate: '2026-12-08',
+      members: [{ id: 'm1', name: '재원' }, { id: 'm2', name: '아내' }, { id: 'm3', name: '아들' }]
+    });
+    S1.add(t.id, 'schedules', { dayKey: 'd2', time: '10:00', title: '오사카성', category: 'sight', place: '오사카성', lat: 34.6873, lng: 135.5259, source: 'kakao' });
+    S1.add(t.id, 'expenses', { dayKey: 'd2', title: '이치란 라멘', amount: 3900, currency: 'JPY', rate: 9.43, chargedKRW: 36900, category: 'food', payerId: 'm1', sharedWith: ['m1', 'm2', 'm3'] });
+    w1.TL.Auth.setProvider({
+      google: function () { w1.TL.Auth.testSignIn({ uid: 'shot1', displayName: '재원', email: 'taiji0021@gmail.com' }); return Promise.resolve({ method: 'popup' }); },
+      emailSignIn: function (e) { w1.TL.Auth.testSignIn({ uid: 'shot1', displayName: '재원', email: e }); return Promise.resolve(w1.TL.Auth.currentUser()); },
+      signOut: function () { w1.TL.Auth.testSignOut(); return Promise.resolve(true); }
+    });
+    w1.TL.Auth.testSignIn({ uid: 'shot1', displayName: '재원', email: 'taiji0021@gmail.com' });
+    S1.setNickname('재원');
+    w1.TL.App.goHome();
+    await sleep(400);
+
+    var f2 = document.getElementById('f2');
+    await loadFrame(f2, '../index.html?shot=login2&t=' + Date.now());
+    await waitReady(f2);
+    var w2 = f2.contentWindow;
+    w2.TL.Store.setFirebase({ apiKey: 'shot-key', projectId: 'shot-project', appId: 'shot-app' });
+    w2.TL.Dialogs.account();
+    await sleep(500);
+    window.__READY = true;
+  }
+  main().catch(function (e) { window.__ERR = String(e && e.stack || e); });
+})();
+</script>
+</body>
+</html>

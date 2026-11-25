@@ -739,6 +739,28 @@
     '</div>';
   }
 
+  /* ---- v26: 장소 → 일정 이름 자동 채움 ----
+     이름칸이 비었거나 앞서 자동으로 채운 값일 때만 바꾼다. 사용자가 직접 고친 이름은 그대로 둔다. */
+  D.autoTitle = function (name) {
+    if (!dlg || dlg.kind !== 'schedule' || !name) return '';
+    var el = document.getElementById('f_title');
+    if (!el) return '';
+    var cur = String(el.value || '').trim();
+    if (cur && cur !== dlg.titleAuto) return cur;
+    el.value = String(name);
+    dlg.titleAuto = String(name);
+    var hint = document.getElementById('title-hint');
+    if (hint) hint.textContent = '장소에서 자동으로 채웠어요 · 다르게 부르고 싶을 때만 고쳐 주세요.';
+    return dlg.titleAuto;
+  };
+  /** 장소 검색창에 친 글자를 이름칸으로 옮긴다 (검색 결과를 고르지 않고 그냥 입력해도 되게) */
+  D.mirrorPlaceTitle = function (text) {
+    if (!dlg || dlg.kind !== 'schedule') return '';
+    var q = String(text == null ? UI.val('pl_q') : text).trim();
+    if (!q) return '';
+    return D.autoTitle(q);
+  };
+
   D.renderPlaceResults = function (out) {
     var box = document.getElementById('pl-results');
     if (!box) return;
@@ -776,10 +798,14 @@
     /* 새 일정: 이 날 마지막 일정 + 1시간 (없으면 09:00). 수정: 저장된 시간 그대로 */
     var autoTime = item ? '' : Core.nextScheduleTime(trip.data && trip.data.schedules, day);
     if (item) dlg.timeAuto = false; else dlg.timeAuto = true;
+    dlg.titleAuto = '';                               // v26: 장소에서 자동으로 채운 이름 (사용자가 고치면 비운다)
     var html = '';
     html += '<div class="form-row"><label class="fl">카테고리</label>' + D.catPickHtml(item ? item.category : 'sight') + '</div>';
+    /* v26: 장소가 먼저 — 장소를 고르면 일정 이름이 그 이름으로 자동으로 채워진다 */
+    html += placeBoxHtml(dlg.picked);
     html += '<div class="form-row"><label class="fl">일정 이름</label>' +
-      '<input class="input" id="f_title" placeholder="예: 도톤보리 산책" maxlength="60" value="' + UI.esc(item ? item.title : '') + '"></div>';
+      '<input class="input" id="f_title" placeholder="예: 도톤보리 산책" maxlength="60" value="' + UI.esc(item ? item.title : '') + '">' +
+      '<div class="hintline" id="title-hint">장소를 고르면 자동으로 채워져요. 다르게 부르고 싶을 때만 고쳐 주세요.</div></div>';
     html += '<div class="form-row"><label class="fl">날짜</label><select class="input" id="f_day">' +
       Core.dayList(trip).map(function (d) {
         return '<option value="' + d.key + '"' + (d.key === day ? ' selected' : '') + '>' + d.label +
@@ -787,10 +813,9 @@
       }).join('') + '</select></div>';
     html += '<div class="form-row"><label class="fl">시간 <span style="font-weight:500">(선택)</span></label>' +
       D.timePickHtml(item ? (item.time || '') : autoTime, { auto: !item }) + '</div>';
-    html += placeBoxHtml(dlg.picked);
     html += coordBoxHtml(dlg.picked);
     html += '<div class="form-row"><label class="fl">지도에 검색할 장소명 <span style="font-weight:500">(선택)</span></label>' +
-      '<input class="input" id="f_place" placeholder="비우면 위 이름으로 검색해요" maxlength="60" value="' + UI.esc(item ? (item.place || '') : '') + '"></div>';
+      '<input class="input" id="f_place" placeholder="비우면 일정 이름으로 검색해요" maxlength="60" value="' + UI.esc(item ? (item.place || '') : '') + '"></div>';
     html += '<div class="form-row"><label class="fl">메모</label>' +
       '<textarea class="input" id="f_memo" placeholder="예약 시간, 팁, 챙길 것" maxlength="300">' + UI.esc(item ? (item.memo || '') : '') + '</textarea></div>';
     if (item) {
@@ -846,8 +871,8 @@
     dlg.picked = { name: r.name, address: r.address, lat: r.lat, lng: r.lng, url: r.url, source: r.source };
     var chip = document.getElementById('pl-picked');
     if (chip) { chip.innerHTML = pickedHtml(dlg.picked); chip.classList.remove('hide'); }
-    var titleEl = document.getElementById('f_title');
-    if (titleEl && !titleEl.value.trim()) titleEl.value = r.name;
+    /* v26: 이름칸이 비었거나 자동 값이면 고른 장소명으로 (직접 고친 이름은 유지) */
+    D.autoTitle(r.name);
     var placeEl = document.getElementById('f_place');
     if (placeEl) placeEl.value = r.name;
     UI.$$('.pl-row').forEach(function (b) { b.classList.remove('active'); });
@@ -891,8 +916,7 @@
         if (!dlg.picked.address) dlg.picked.address = r.address || '';
         var chip2 = document.getElementById('pl-picked');
         if (chip2) { chip2.innerHTML = pickedHtml(dlg.picked); chip2.classList.remove('hide'); }
-        var titleEl = document.getElementById('f_title');
-        if (titleEl && !titleEl.value.trim() && r.name) titleEl.value = r.name;
+        if (r.name) D.autoTitle(r.name);
         var placeEl2 = document.getElementById('f_place');
         if (placeEl2 && !placeEl2.value.trim() && r.name) placeEl2.value = r.name;
       }).catch(function () {});

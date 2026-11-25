@@ -301,6 +301,9 @@
       if (cur !== 'KRW' && TL.Dialogs.autoRate) TL.Dialogs.autoRate(cur);
     } else if (id === 'f_day') {
       if (TL.Dialogs.autoTimeForDay) TL.Dialogs.autoTimeForDay();
+    } else if (id === 'pl_q') {
+      /* v26: 장소를 치면 일정 이름이 비어 있을 때 그 이름으로 채워 준다 */
+      if (TL.Dialogs.mirrorPlaceTitle) TL.Dialogs.mirrorPlaceTitle(ev.target.value);
     } else if (id === 'f_time') {
       if (TL.Dialogs.markTimeManual) TL.Dialogs.markTimeManual();
       if (TL.Dialogs.syncTimePick) TL.Dialogs.syncTimePick();
