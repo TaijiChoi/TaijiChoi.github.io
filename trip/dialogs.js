@@ -501,7 +501,8 @@
   }
   function tpHour12(hour) { return hour % 12 === 0 ? 12 : hour % 12; }
   /** 시간 팝오버(휠) HTML — 등록/수정 시트 안에 숨은 채로 들어간다 */
-  D.timePopHtml = function (value) {
+  D.timePopHtml = function (value, opts) {
+    opts = opts || {};
     var p = Core.timeParts(value);
     var has = p.hour != null;
     var h12 = has ? tpHour12(p.hour) : 9;
@@ -529,7 +530,8 @@
           '<span class="tp-colon">:</span>' +
           '<div class="tp-wheel" id="w-min" role="listbox" aria-label="분">' + mins + '</div>' +
         '</div>' +
-        '<div class="tp-preview" id="tp-preview">' + UI.esc(Core.timeLabel(value)) + '</div>' +
+        '<div class="tp-preview"><span id="tp-preview">' + UI.esc(Core.timeLabel(value)) + '</span>' +
+          (opts.auto ? '<span class="tp-auto" data-auto="1">앞 일정 +1시간</span>' : '') + '</div>' +
         '<div class="tp-direct"><span>직접 입력</span>' +
           '<input class="input tp-input" type="text" inputmode="numeric" id="f_time" maxlength="5" ' +
           'placeholder="09:30" value="' + UI.esc(value || '') + '" aria-label="시간 직접 입력">' +
@@ -554,7 +556,7 @@
       '<div class="hintline" id="tp-hint">' + (auto
         ? '이 날 마지막 일정 다음 시간으로 맞춰 뒀어요. 시계를 눌러 바꿀 수 있어요.'
         : '시계를 눌러 오전·오후와 시·분을 고르세요.') + '</div>' +
-      D.timePopHtml(value) +
+      D.timePopHtml(value, { auto: auto }) +
       '</div>';
   };
   /** 시계 버튼·휠·요약을 현재 f_time 값에 맞춰 갱신 */
@@ -582,6 +584,7 @@
   /** 직접 고르면 '자동' 배지를 내린다 */
   D.markTimeManual = function () {
     if (dlg && dlg.kind === 'schedule') dlg.timeAuto = false;
+    UI.$$('.tp-auto').forEach(function (b) { b.classList.add('hide'); });
     var badge = document.getElementById('tp-auto');
     if (badge) badge.classList.add('hide');
     var hint = document.getElementById('tp-hint');
@@ -655,6 +658,7 @@
     if (dlg && dlg.kind === 'schedule') dlg.timeAuto = tps.auto;
     var badge = document.getElementById('tp-auto');
     if (badge) badge.classList.toggle('hide', !tps.auto);
+    UI.$$('.tp-auto').forEach(function (b) { b.classList.toggle('hide', !tps.auto); });
     var hint = document.getElementById('tp-hint');
     if (hint && tps.hintBackup) hint.textContent = tps.hintBackup;
   }
