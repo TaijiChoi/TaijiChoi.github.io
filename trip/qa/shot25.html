@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>트립로그 v25 화면 캡처 — 일정 시트 카테고리·시계 피커·자동 시간</title>
+<style>
+  body{margin:0;padding:16px;background:#0F172A;font-family:sans-serif;color:#fff}
+  iframe{width:390px;height:844px;border:0;border-radius:16px;background:#fff;display:block}
+</style>
+</head>
+<body>
+<iframe id="f" title="트립로그 v25 캡처" src="../index.html?shot=25"></iframe>
+<script>
+(function () {
+  'use strict';
+  var f = document.getElementById('f');
+  function ready() {
+    try { var w = f.contentWindow; return !!(w && w.TL && w.TL.Store && w.TL.App && w.document.getElementById('screen')); } catch (e) { return false; }
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  async function waitReady() {
+    for (var i = 0; i < 160; i++) { if (ready()) return true; await sleep(80); }
+    return false;
+  }
+  function w() { return f.contentWindow; }
+  function seed() {
+    var win = w();
+    win.eval('TL.Store.connect = function (tripId) { var t = TL.Store.trip(tripId); if (t && !t.remoteCode) { t.remoteCode = "SHOT25"; t.inviteCode = "SHOT25"; } return Promise.resolve({ code: "SHOT25" }); };');
+    win.TL.Auth.testSignIn({ uid: 'shot25', displayName: '재원', email: 'shot25@example.com' });
+    win.TL.Store.clearAll();
+    var t = win.TL.Store.createTrip({
+      name: '서울 하루 코스', destination: '서울', startDate: '2026-12-05', endDate: '2026-12-06',
+      members: [{ id: 'm1', name: '재원', uid: 'shot25' }, { id: 'm2', name: '아내' }, { id: 'm3', name: '아들' }]
+    });
+    function sched(day, time, title, cat, place, order) {
+      win.TL.Store.add(t.id, 'schedules', { dayKey: day, time: time, title: title, category: cat, place: place, placeName: place, order: order });
+    }
+    sched('d1', '09:30', '경복궁', 'sight', '경복궁', 0);
+    sched('d1', '12:00', '광장시장 육회', 'food', '광장시장', 1);
+    sched('d1', '14:30', '익선동 한옥카페', 'cafe', '익선동', 2);
+    win.TL.Store.testInjectConn(t.id, 'SHOT25', true);
+    win.TL.Store.notify();
+    window.__tripId = t.id;
+    return t.id;
+  }
+  function emojiFont() {
+    var win = w(), doc = win.document;
+    if (doc.getElementById('shot-emoji-font')) return;
+    var st = doc.createElement('style');
+    st.id = 'shot-emoji-font';
+    st.textContent = "@import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji');" +
+      "body,button,input,textarea{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Noto Sans KR',Roboto,'Noto Color Emoji',sans-serif !important}";
+    doc.head.appendChild(st);
+  }
+  window.__shotSheet = async function () {
+    var win = w(), doc = win.document;
+    emojiFont();
+    await sleep(600);
+    if (!win.TL.Auth.signedIn()) win.TL.Auth.testSignIn({ uid: 'shot25', displayName: '재원', email: 'shot25@example.com' });
+    win.TL.App.openTrip(window.__tripId, 'schedule');
+    await sleep(500);
+    win.TL.Dialogs.schedule(win.TL.Store.trip(window.__tripId), null, 'd1');
+    await sleep(400);
+    var open = doc.querySelector('[data-action="time-open"]');
+    if (open) open.click();
+    await sleep(500);
+    return true;
+  };
+  window.__state = function () {
+    var doc = w().document;
+    return {
+      catTop: (doc.querySelector('.sheet-body .form-row') || {}).textContent || '',
+      cats: Array.prototype.map.call(doc.querySelectorAll('#cat-pick .cat-chip'), function (b) { return b.textContent.trim() + (b.classList.contains('active') ? '*' : ''); }),
+      time: (doc.querySelector('#f_time') || {}).value || '',
+      sum: (doc.querySelector('#tp-val') || {}).textContent || '',
+      auto: !!doc.querySelector('#tp-auto'),
+      popOpen: !!doc.querySelector('#tp-pop') && !doc.querySelector('#tp-pop').classList.contains('hide'),
+      wheelOn: Array.prototype.map.call(doc.querySelectorAll('#w-hour .tp-wi.on, #w-min .tp-wi.on'), function (b) { return b.textContent; })
+    };
+  };
+  (async function () {
+    if (!(await waitReady())) { document.title = 'shot-error boot'; return; }
+    await sleep(200);
+    seed();
+    await sleep(300);
+    window.__ready = true;
+    document.title = 'shot-ready';
+  })();
+})();
+</script>
+</body>
+</html>
