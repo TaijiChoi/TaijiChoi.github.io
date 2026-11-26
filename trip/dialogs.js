@@ -183,7 +183,7 @@
     } else if (danger.mode === 'leave') {
       html += '<div class="danger-box">' +
         '<div class="danger-head">' + UI.icon('close', 18) + '<b>' + UI.esc(trip.name) + ' 여행을 목록에서 뺄까요?</b></div>' +
-        '<p class="danger-lead">이 기기 목록에서만 빠지고, 방장과 일행들의 방·데이터는 그대로 남아요.</p>' +
+        '<p class="danger-lead">내 여행 목록에서 빠지고, 같은 계정으로 로그인한 다른 기기에서도 목록에서 사라져요. 방장과 일행들의 방·데이터는 그대로 남아요.</p>' +
         '<p class="hintline">초대 링크(' + UI.esc(String(trip.remoteCode)) + ')로 다시 들어올 수는 있어요.</p></div>';
       html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">취소</button>' +
         '<button class="btn btn-danger" data-action="delete-trip-confirm">목록에서 빼기</button></div>';
@@ -207,7 +207,7 @@
       Store.removeTrip(trip.id);
       UI.close();
       TL.App.goHome();
-      UI.toast(mode === 'leave' ? '목록에서 뺐어요 · 일행들의 방은 그대로예요' : '삭제했어요');
+      UI.toast(mode === 'leave' ? '목록에서 뺐어요 · 다른 기기 목록에서도 빠져요' : '삭제했어요');
       return;
     }
     UI.close();
