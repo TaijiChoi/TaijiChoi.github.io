@@ -58,7 +58,15 @@
   M.paint = function (trip, day, source, route) {
     var el = document.getElementById('route-map');
     if (!trip || !el) { M.hide(); return; }
-    var items = Core.sortedSchedules(trip.data, day).filter(Core.hasGeo);
+    var allItems = Core.sortedSchedules(trip.data, day);
+    // v31: 핀 번호는 아래 일정 카드의 순번(1-based). 좌표 없는 일정도 번호를 차지한다.
+    var nums = {};
+    allItems.forEach(function (it, i) { nums[it.id] = i + 1; });
+    function nOf(it) {
+      var n = nums[it.id];
+      return n || (allItems.indexOf(it) + 1);
+    }
+    var items = allItems.filter(Core.hasGeo);
     if (!items.length) { M.hide(); return; }
     var src = Core.mapSource(source);
     var routeSig = (route && route.ok && route.path ? 'road:' + route.path.length + '@' + Math.round(route.km * 100) : 'direct');
@@ -108,19 +116,31 @@
       }
 
       var pts = [];
-      items.forEach(function (it, i) {
-        // v23: 카테고리별로 핀 색을 다르게 (숫자는 흰 글씨 + 흰 테두리라 그대로 읽힌다)
-        var color = Core.catColor(it.category);
+      // v31: 같은 자리(약 10m 이내) 좌표는 핀 하나에 `1·4`처럼 번호를 합쳐 보여 준다.
+      //      출발지와 귀가 장소가 같을 때 뒤 핀이 앞 핀에 가려 보이지 않던 문제를 막는다.
+      Core.pinGroups(items).forEach(function (g) {
+        var first = g.items[0];
+        var groupNums = g.items.map(nOf);
+        var label = groupNums.join('·');
+        var multi = g.items.length > 1;
+        var color = Core.catColor(first.category);
         var icon = L.divIcon({
           className: 'rt-icon',
-          html: '<span class="rt-pin" style="background:' + color + '" data-cat="' + Core.esc(Core.schedCat(it.category).key) + '">' + (i + 1) + '</span>',
-          iconSize: [28, 28], iconAnchor: [14, 14]
+          html: '<span class="rt-pin' + (multi ? ' multi' : '') + '" style="background:' + color + '" data-cat="' + Core.esc(Core.schedCat(first.category).key) + '">' + label + '</span>',
+          iconSize: multi ? [Math.max(34, 20 + 8 * label.length), 28] : [28, 28],
+          iconAnchor: multi ? [Math.max(34, 20 + 8 * label.length) / 2, 14] : [14, 14]
         });
-        L.marker([Number(it.lat), Number(it.lng)], { icon: icon, title: it.title }).addTo(m)
-          .bindPopup('<b>' + (i + 1) + '. ' + Core.esc(it.title) + '</b>' +
+        var popup = g.items.map(function (it) {
+          return '<b>' + nOf(it) + '. ' + Core.esc(it.title) + '</b>' +
+            (it.time ? '<br>' + Core.esc(it.time) : '') +
             (it.placeName || it.place ? '<br>' + Core.esc(it.placeName || it.place) : '') +
-            '<br><span style="color:' + color + ';font-weight:700">' + Core.esc(Core.schedCat(it.category).label) + '</span>');
-        pts.push([Number(it.lat), Number(it.lng)]);
+            '<br><span style="color:' + Core.catColor(it.category) + ';font-weight:700">' + Core.esc(Core.schedCat(it.category).label) + '</span>';
+        }).join('<hr style="margin:5px 0;border:0;border-top:1px solid #E2E9F5">');
+        L.marker([Number(first.lat), Number(first.lng)], {
+          icon: icon,
+          title: g.items.map(function (it) { return nOf(it) + '. ' + (it.title || ''); }).join(' / ')
+        }).addTo(m).bindPopup(popup);
+        g.items.forEach(function (it) { pts.push([Number(it.lat), Number(it.lng)]); });
       });
       var roadPath = (route && route.ok && route.path && route.path.length > 1) ? route.path : null;
       if (roadPath) {

@@ -110,7 +110,13 @@
   };
 
   S.routePanel = function (trip, day, items, view) {
-    var geo = items.filter(Core.hasGeo);
+    // v31: 지도 핀·동선 칩 번호 = 아래 일정 카드의 순번(1-based). 좌표 없는 일정도 번호를 차지한다.
+    var numbered = (items || []).map(function (it, i) { return { it: it, n: i + 1 }; });
+    var geoN = numbered.filter(function (x) { return Core.hasGeo(x.it); });
+    var geo = geoN.map(function (x) { return x.it; });
+    var missing = numbered.length - geo.length;
+    var numById = {};
+    numbered.forEach(function (x) { numById[x.it.id] = x.n; });
     if (!geo.length) {
       return '<div class="route-card empty-map"><div class="route-head static">' +
         '<span class="rh-ic">' + UI.icon('map', 18) + '</span>' +
@@ -129,6 +135,7 @@
     } else {
       headNote += ' · 핀만 표시';
     }
+    if (missing) headNote += ' · 위치 미지정 ' + missing + '건 제외';
     var html = '<div class="route-card">';
     html += '<button class="route-head" data-action="toggle-map" aria-expanded="' + (open ? 'true' : 'false') + '">' +
       '<span class="rh-ic">' + UI.icon('map', 18) + '</span>' +
@@ -161,16 +168,26 @@
           return '<span class="cl-item" data-cat="' + c.key + '"><i style="background:' + c.color + '"></i>' + UI.esc(c.label) + '</span>';
         }).join('') + '</div>';
       }
-      html += '<div class="route-pins">' + geo.map(function (it, i) {
-        return '<span class="rp"><b style="background:' + Core.catColor(it.category) + '">' + (i + 1) + '</b>' + UI.esc(it.title) + '</span>';
+      html += '<div class="route-pins">' + geoN.map(function (x) {
+        var it = x.it;
+        var tip = x.n + '. ' + (it.title || '') + (it.time ? ' · ' + it.time : '') + ' · ' + Core.schedCat(it.category).label;
+        return '<span class="rp" title="' + UI.esc(tip) + '"><b style="background:' + Core.catColor(it.category) + '">' + x.n + '</b>' + UI.esc(it.title) + '</span>';
       }).join('') + '</div>';
+      // v31: 같은 자리 좌표는 지도에서 핀 하나에 번호를 합쳐 보여 준다
+      var merged = Core.pinGroups(geo).filter(function (g) { return g.items.length > 1; });
+      if (merged.length) {
+        html += '<div class="hintline pin-merge-note">같은 자리 일정은 지도 핀 하나에 ' +
+          UI.esc(merged[0].items.map(function (it) { return numById[it.id]; }).join('·')) + '처럼 함께 표시해요</div>';
+      }
       if (routeUrl) {
         html += '<a class="btn btn-soft map-all" href="' + UI.esc(routeUrl) + '" target="_blank" rel="noopener"' +
           (geo.length > 1 ? ' title="' + UI.esc(geo.slice(0, 10).map(function (it) { return it.title; }).join(' → ')) + '"' : '') + '>' +
           UI.icon('map', 17) + Core.routeMapLabel(geo.length) + '</a>';
       }
       if (sum.segs.length) {
-        html += '<div class="seg-list">' + sum.segs.map(function (s, i) { return S.segRow(s, i); }).join('') + '</div>';
+        html += '<div class="seg-list">' + sum.segs.map(function (s, i) {
+          return S.segRow(s, i, numById[s.fromId], numById[s.toId]);
+        }).join('') + '</div>';
       } else {
         html += '<div class="hintline" style="padding:0 12px 10px">좌표가 있는 일정이 2곳 이상이면 구간 거리와 길찾기가 나와요.</div>';
       }
@@ -179,7 +196,7 @@
     return html;
   };
 
-  S.segRow = function (seg, i) {
+  S.segRow = function (seg, i, fromN, toN) {
     var links = Core.directionsLinks(seg.from, seg.to);
     var detail = seg.road
       ? '<span class="seg-tag road">도로</span> ' + Core.kmLabel(seg.km) + ' · 차 약 ' + Core.durLabel(seg.min) +
@@ -187,7 +204,8 @@
       : '<span class="seg-tag straight">직선 추정</span> ' + Core.kmLabel(seg.km) + ' · 도보 약 ' + Core.durLabel(seg.walkMin) +
         ' · 차 약 ' + Core.durLabel(seg.carMin);
     return '<div class="seg-row' + (seg.road ? ' road' : '') + '">' +
-      '<span class="seg-n">' + (i + 1) + '→' + (i + 2) + '</span>' +
+      // v31: 구간 번호도 일정 카드 순번을 그대로 쓴다 (좌표 없는 일정은 건너뛰므로 1→3처럼 보일 수 있다)
+      '<span class="seg-n">' + (fromN || (i + 1)) + '→' + (toN || (i + 2)) + '</span>' +
       '<span class="seg-mid"><b>' + UI.esc(seg.fromTitle) + ' → ' + UI.esc(seg.toTitle) + '</b>' +
         '<small>' + detail + '</small></span>' +
       (links ? '<span class="seg-links">' +

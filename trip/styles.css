@@ -596,6 +596,9 @@ label.btn{cursor:pointer}
   border:2px solid #fff;box-shadow:0 3px 10px rgba(30,60,120,.3)}
 /* v23: 카테고리별 핀 색 (색은 map.js가 Core.catColor로 넣는다) */
 .rt-icon .rt-pin{border:2px solid #fff;box-shadow:0 3px 10px rgba(20,35,70,.34)}
+/* v31: 같은 자리 일정이 합쳐진 핀은 `1·4`처럼 넓게 (알약 모양) */
+.rt-icon .rt-pin.multi{width:auto;min-width:34px;height:26px;padding:0 5px;border-radius:999px;
+  font-size:10.5px;letter-spacing:-.2px;white-space:nowrap}
 /* v23: 도로 경로 기준 / 직선 추정(폴백) 배지 */
 .rt-badge{display:inline-flex;align-items:center;gap:3px;height:19px;padding:0 7px;border-radius:999px;
   font-size:9.5px;font-weight:800;letter-spacing:-.1px;white-space:nowrap;flex:none}
@@ -620,6 +623,8 @@ label.btn{cursor:pointer}
   max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .route-pins .rp b{width:18px;height:18px;border-radius:50%;background:var(--blue);color:#fff;font-size:9.5px;
   display:grid;place-items:center;flex:none;border:1.5px solid #fff;box-shadow:0 1px 4px rgba(20,35,70,.22)}
+/* v31: 같은 자리 핀 안내 */
+.pin-merge-note{padding:0 12px 8px;margin:0}
 .seg-list{padding:0 12px 10px}
 .seg-row{display:grid;grid-template-columns:34px 1fr;gap:6px;align-items:start;padding:8px 0;border-top:1px dashed #EDF1F7}
 .seg-row .seg-n{font-size:10.5px;font-weight:800;color:var(--blue-d);background:var(--blue-l);

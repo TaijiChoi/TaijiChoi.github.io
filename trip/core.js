@@ -589,6 +589,23 @@
       Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
     return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
   };
+  /** 같은 자리로 보는 좌표 열쇠 (소수 4자리 ≈ 10m). 지도에서 핀을 합칠 때 쓴다 (v31) */
+  Core.geoKey = function (it) {
+    if (!Core.hasGeo(it)) return '';
+    return Number(it.lat).toFixed(4) + ',' + Number(it.lng).toFixed(4);
+  };
+  /** 좌표가 같은 자리(약 10m 이내)인 일정끼리 묶는다 — 핀 하나에 `1·4`처럼 번호를 합쳐 보여 준다 (v31) */
+  Core.pinGroups = function (items) {
+    var groups = [], byKey = {};
+    (items || []).forEach(function (it) {
+      if (!it || !Core.hasGeo(it)) return;
+      var key = Core.geoKey(it);
+      var g = byKey[key];
+      if (!g) { g = byKey[key] = { key: key, lat: Number(it.lat), lng: Number(it.lng), items: [] }; groups.push(g); }
+      g.items.push(it);
+    });
+    return groups;
+  };
   /** 직선거리 기준 도보 시간(분). 도심 평균 4.5km/h */
   Core.walkMin = function (km) { return km > 0 ? Math.max(1, Math.round((km / 4.5) * 60)) : 0; };
   /** 직선거리 기준 차량 시간(분). 도심 평균 22km/h + 승하차 3분 */
@@ -811,25 +828,38 @@
     return pad(Math.floor(m / 60)) + ':' + pad(m % 60);
   };
   /**
-   * 같은 날 일정 중 시간이 겹치는 쌍. 일정 하나는 기본 60분(또는 duration 분)을 차지한다고 본다.
-   * 시간이 비어 있는 일정은 비교에서 뺀다.
+   * 같은 날 일정 중 시간이 겹치는 쌍 (v31).
+   * · 길이를 아는 일정(`duration` 분 또는 `endTime`)만 그 구간으로 비교한다.
+   * · 길이를 모르는 일정(종료 시간 없음)은 **시작 시각이 같을 때만** 겹침으로 본다.
+   *   예전에는 모든 일정이 기본 60분을 차지한다고 봐서 `12:00 출발 → 12:40 픽업 → 13:00 식당`처럼
+   *   정상적으로 이어지는 이동 일정에도 "시간이 겹쳐요"가 떴다.
+   * · 시간이 비어 있는 일정은 비교에서 뺀다.
+   * durMin: 예전 호출과의 호환용 인자 — 더 이상 기본 길이로 쓰지 않는다.
    */
   Core.overlapPairs = function (items, durMin) {
-    var def = Number(durMin) > 0 ? Number(durMin) : 60;
     var timed = (items || []).map(function (it) {
       var st = Core.timeMin(it.time);
-      var len = Number(it.duration) > 0 ? Number(it.duration) : def;
-      return st == null ? null : { it: it, start: st, end: st + len };
+      if (st == null) return null;
+      var len = 0;
+      var end = Core.timeMin(it.endTime);
+      if (end != null && end > st) len = end - st;
+      else if (Number(it.duration) > 0) len = Math.round(Number(it.duration));
+      return { it: it, start: st, end: st + len, len: len };
     }).filter(Boolean).sort(function (a, b) { return a.start - b.start; });
     var out = [];
     for (var i = 0; i < timed.length; i++) {
       for (var j = i + 1; j < timed.length; j++) {
-        if (timed[j].start >= timed[i].end) break;
+        var a = timed[i], b = timed[j];
+        if (b.start > a.end) break;          // 시간순이라 뒤 일정도 모두 겹치지 않는다
+        var over;
+        if (b.start === a.start) over = Math.max(0, Math.min(a.end, b.end) - a.start);   // 같은 시각이면 길이 0이어도 겹침
+        else if (b.start < a.end) over = Math.min(a.end, b.end) - b.start;
+        else continue;                        // 길이 0인 일정 뒤로 떨어진 일정 — 겹치지 않는다
         out.push({
-          aId: timed[i].it.id, bId: timed[j].it.id,
-          aTitle: timed[i].it.title || '', bTitle: timed[j].it.title || '',
-          aTime: timed[i].it.time, bTime: timed[j].it.time,
-          overlapMin: Math.min(timed[i].end, timed[j].end) - timed[j].start
+          aId: a.it.id, bId: b.it.id,
+          aTitle: a.it.title || '', bTitle: b.it.title || '',
+          aTime: a.it.time, bTime: b.it.time,
+          overlapMin: over
         });
       }
     }
