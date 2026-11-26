@@ -925,3 +925,23 @@ body.dragging{user-select:none;-webkit-user-select:none}
   #print-area .ov-x small,#print-area .ov-x i{font-size:8.5pt;color:#555}
   #print-area .ov-foot{margin-top:10pt;font-size:8pt;color:#777}
 }
+
+/* ================================================= v28: 지난 일행 자동완성 */
+.ct-suggest{margin-top:6px;border:1px solid var(--line);border-radius:13px;background:#fff;
+  padding:2px 6px;box-shadow:0 8px 20px rgba(16,32,64,.06)}
+.ct-suggest.hide{display:none}
+.ct-head{font-size:10.5px;font-weight:750;color:var(--sub-2);padding:6px 6px 4px;letter-spacing:.02em}
+.ct-row{display:flex;align-items:center;gap:9px;width:100%;border:0;background:none;
+  padding:8px 6px;border-radius:10px;text-align:left}
+.ct-row:active,.ct-row:hover{background:#F5F8FE}
+.ct-row .ct-tx{min-width:0;display:flex;flex-direction:column;flex:1}
+.ct-row .ct-tx b{font-size:13.5px;font-weight:750;color:var(--ink)}
+.ct-row .ct-tx small{font-size:11px;color:var(--sub-2);font-weight:600;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ct-row .ct-n{flex:none;font-size:10.5px;font-weight:750;color:var(--blue-d);
+  background:var(--blue-l);border-radius:6px;padding:2px 5px}
+
+/* v28: 초대 참여 — 일행 중 본인 고르기 */
+#join-list .mrow{padding:8px 0}
+#join-list .mem-main small{color:var(--sub-2)}
+.join-new-row{margin-top:12px}

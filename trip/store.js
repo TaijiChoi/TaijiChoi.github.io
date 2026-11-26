@@ -9,6 +9,7 @@
   var Store = (TL.Store = {});
 
   var KEY = 'triplog.v1';
+  var CONTACTS_KEY = 'triplog.contacts.v1';   // v28: 지난 일행 이름·이메일 (이 기기에만)
   var FB_VERSION = '10.12.2';
   var FB_BASE = 'https://www.gstatic.com/firebasejs/' + FB_VERSION + '/';
   var COLLS = ['schedules', 'expenses', 'checklist', 'reservations'];
@@ -145,6 +146,87 @@
     save();
   };
   Store.isRemote = function (trip) { return !!(trip && trip.remoteCode); };
+
+  /* ---------------------------------------------- v28: 초대 코드 / 재발급
+     방 문서 코드(trip.remoteCode)는 데이터 경로라 바뀌지 않고, 초대 코드(trip.inviteCode)만 새로 발급한다.
+     · 새 코드는 triplog_meta/join-<코드> 별칭 문서가 방 문서를 가리킨다
+     · 방 문서의 inviteCode와 다른 코드(예전 코드)로는 새로 들어올 수 없다 — 이미 들어온 일행의 연결은 그대로
+     · 이 기기에 이미 있는 방은 remoteCode로 계속 붙으므로, 초대 코드가 바뀌어도 끊기지 않는다 */
+  function normalizeCode(c) { return String(c == null ? '' : c).trim().toUpperCase(); }
+  Store.normalizeCode = normalizeCode;
+  Store.REVOKED_MESSAGE = '방장이 초대 코드를 새로 발급했어요. 새 초대 링크를 받아 주세요.';
+  /** 지금 유효한 초대 코드 (없으면 방 문서 코드) */
+  Store.inviteCodeOf = function (trip) {
+    return normalizeCode((trip && (trip.inviteCode || trip.remoteCode)) || '');
+  };
+  function joinAliasDocId(code) { return 'join-' + normalizeCode(code); }
+  /** 초대 코드 → 방 문서 코드. 별칭 문서가 있으면 그 방, 없으면 같은 이름의 방 문서를 본다
+      · 읽지 못했을 때(오프라인·권한)는 코드를 방 문서 코드로 보고 넘긴다 —
+        연결 뒤 방 문서 스냅샷의 inviteCode로 다시 한 번 확인한다 */
+  function resolveInvite(fsMod, code) {
+    var c = normalizeCode(code);
+    if (!/^[A-Z0-9]{4,10}$/.test(c)) return Promise.resolve({ ok: false, reason: 'badcode' });
+    var existsOf = function (snap) {
+      return !!(snap && (typeof snap.exists === 'function' ? snap.exists() : (snap.data && snap.data())));
+    };
+    var dataOf = function (snap) { return (snap && snap.data && snap.data()) || {}; };
+    var aliasRef = fsMod.doc(db, 'triplog_meta', joinAliasDocId(c));
+    return withTimeout(fsMod.getDoc(aliasRef), 8000, 'join-timeout').then(function (snap) {
+      var d = existsOf(snap) ? dataOf(snap) : null;
+      if (d && d.room && d.deleted !== true) return { ok: true, room: normalizeCode(d.room), invite: c };
+      var roomRef = fsMod.doc(db, 'trips', c);
+      return withTimeout(fsMod.getDoc(roomRef), 8000, 'room-timeout').then(function (snap2) {
+        if (!existsOf(snap2)) return { ok: false, reason: 'notfound' };
+        var m = dataOf(snap2);
+        if (m.deleted === true) return { ok: false, reason: 'notfound' };
+        var inv = normalizeCode(m.inviteCode);
+        if (inv && inv !== c) return { ok: false, reason: 'revoked' };   // 재발급 전의 예전 코드
+        return { ok: true, room: c, invite: c };
+      }, function () { return { ok: true, room: c, invite: c, unchecked: true }; });
+    }, function () { return { ok: true, room: c, invite: c, unchecked: true }; });
+  }
+  /** 방장이 초대 코드를 새로 발급한다 — 이전 코드·링크로는 더 이상 들어올 수 없다 */
+  Store.reissueInviteCode = function (tripId) {
+    var trip = Store.trip(tripId);
+    if (!trip) return Promise.reject(Object.assign(new Error('여행을 찾을 수 없습니다'), { code: 'notfound' }));
+    if (!Store.canWrite()) {
+      denyLogin();
+      return Promise.reject(Object.assign(new Error('로그인이 필요해요'), { code: 'need-login' }));
+    }
+    if (!Core.canManageMembers(trip, currentUser())) {
+      return Promise.reject(Object.assign(new Error('방장만 초대 코드를 새로 발급할 수 있어요'), { code: 'notowner' }));
+    }
+    var room = normalizeCode(trip.remoteCode);
+    if (!room) return Promise.reject(Object.assign(new Error('아직 공유 방이 없어요 · 실시간 공유를 먼저 켜 주세요'), { code: 'nolink' }));
+    var oldInvite = Store.inviteCodeOf(trip);
+    var next = '';
+    for (var i = 0; i < 10 && !next; i++) {
+      var c = normalizeCode(Core.inviteCode());
+      if (c && c !== oldInvite && c !== room) next = c;
+    }
+    if (!next) next = normalizeCode(Core.inviteCode());
+    var acct = currentUser();
+    var stamp = new Date().toISOString();
+    return Promise.resolve().then(function () { return loadFb(); }).then(function (fsMod) {
+      var roomRef = fsMod.doc(db, 'trips', room);
+      var payload = { inviteCode: next, inviteCodeAt: stamp, inviteCodeBy: (acct && acct.uid) || '' };
+      var write = (typeof fsMod.updateDoc === 'function')
+        ? fsMod.updateDoc(roomRef, payload)                       // 방이 살아 있을 때만 (폭발한 방을 되살리지 않는다)
+        : fsMod.setDoc(roomRef, payload, { merge: true });
+      return write.then(function () {
+        return fsMod.setDoc(fsMod.doc(db, 'triplog_meta', joinAliasDocId(next)),
+          { room: room, code: next, at: stamp, by: (acct && acct.uid) || '' }, { merge: true });
+      }).then(function () {
+        // 예전 코드의 별칭 문서를 지우면 그 링크는 바로 닫힌다 (방 문서 코드 자체는 데이터 경로라 남긴다)
+        if (!oldInvite || oldInvite === room || oldInvite === next) return null;
+        return fsMod.deleteDoc(fsMod.doc(db, 'triplog_meta', joinAliasDocId(oldInvite))).catch(function () {});
+      }).then(function () {
+        trip.inviteCode = next;
+        notify();
+        return { code: next, room: room, oldCode: oldInvite };
+      });
+    });
+  };
 
   /* --------------------------------------------------------- 권한(v20) */
   /** 지금 로그인한 계정 (없으면 null) */
@@ -299,7 +381,7 @@
     notify();
   }
 
-  var META_FIELDS = ['name', 'destination', 'startDate', 'endDate', 'baseCurrency', 'members', 'rates', 'ratesUpdatedAt', 'ownerUid', 'ownerEmail'];
+  var META_FIELDS = ['name', 'destination', 'startDate', 'endDate', 'baseCurrency', 'members', 'rates', 'ratesUpdatedAt', 'ownerUid', 'ownerEmail', 'inviteCode'];
   /** 메타 문서에 실어 보낼 값. keys를 주면 그 항목만 담는다(merge 쓰기라 나머지 필드는 그대로 남는다). */  function metaPayload(trip, keys) {
     var use = Array.isArray(keys) && keys.length ? keys : META_FIELDS;
     var out = {};
@@ -310,6 +392,8 @@
       else if (k === 'baseCurrency') out.baseCurrency = trip.baseCurrency || 'KRW';
       // v24: 방장 계정은 값이 있을 때만 싣는다 — 빈 값으로 다른 기기의 방장 기록을 지우지 않는다
       else if (k === 'ownerUid' || k === 'ownerEmail') { if (trip[k]) out[k] = k === 'ownerEmail' ? String(trip[k]).trim().toLowerCase() : String(trip[k]); }
+      // v28: 지금 유효한 초대 코드 (방 문서 코드와 다를 수 있다 — 재발급 때 바뀐다)
+      else if (k === 'inviteCode') { if (trip.inviteCode) out.inviteCode = String(trip.inviteCode).trim().toUpperCase(); }
       else out[k] = trip[k] || '';
     });
     out.updatedAt = new Date().toISOString();
@@ -336,6 +420,72 @@
     };
   };
   Store.setNickname = function (name) { state.nickname = (name || '').trim(); notify(); };
+
+  /* ------------------------------------------------ v28: 지난 일행 자동완성
+     이름·이메일을 본인 기기의 localStorage('triplog.contacts.v1')에만 저장한다.
+     · 계정 문서·공용 DB(방 문서)로는 보내지 않는다 — rememberContact는 pushMeta를 부르지 않는다
+     · 일행 추가 입력창에서 한 글자만 쳐도 후보가 뜨고, 고르면 이름과 이메일이 함께 채워진다 */
+  Store.CONTACTS_KEY = CONTACTS_KEY;
+  Store.CONTACTS_MAX = 200;
+  function readContacts() {
+    try {
+      var raw = root.localStorage && root.localStorage.getItem(CONTACTS_KEY);
+      var list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list.filter(function (c) { return c && c.name; }) : [];
+    } catch (e) { return []; }
+  }
+  function writeContacts(list) {
+    try {
+      var sorted = (list || []).slice().sort(function (a, b) { return String(b.lastAt || '').localeCompare(String(a.lastAt || '')); });
+      root.localStorage && root.localStorage.setItem(CONTACTS_KEY, JSON.stringify(sorted.slice(0, Store.CONTACTS_MAX)));
+    } catch (e) { /* 저장 공간 부족 등 */ }
+  }
+  function cleanEmail(v) {
+    var s = String(v == null ? '' : v).trim().toLowerCase();
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) ? s : '';
+  }
+  Store.contacts = function () { return readContacts(); };
+  /** 지난 일행 한 명을 기억한다 (이름은 필수, 이메일은 있을 때만). 같은 이름은 최근 이메일로 갱신 */
+  Store.rememberContact = function (name, email, opts) {
+    var nm = String(name == null ? '' : name).trim().slice(0, 12);
+    if (!nm) return null;
+    var mail = cleanEmail(email);
+    var list = readContacts();
+    var hit = null;
+    list.forEach(function (c) { if (!hit && String(c.name).trim().toLowerCase() === nm.toLowerCase()) hit = c; });
+    if (hit) {
+      if (mail && hit.email !== mail) hit.email = mail;
+      if (!(opts && opts.quiet)) hit.count = (Number(hit.count) || 1) + 1;
+      hit.lastAt = new Date().toISOString();
+    } else {
+      hit = { name: nm, email: mail, count: 1, lastAt: new Date().toISOString() };
+      list.push(hit);
+    }
+    writeContacts(list);
+    return hit;
+  };
+  /** 함께한 여행들의 일행을 기기에 모아 둔다 (앱을 열 때·일행을 더할 때 조용히 부른다) */
+  Store.syncContacts = function () {
+    var n = 0;
+    (state.trips || []).forEach(function (t) {
+      if (!t || t.sample) return;
+      (t.members || []).forEach(function (m) {
+        if (!m || !String(m.name || '').trim()) return;
+        var mail = cleanEmail(m.email);
+        var hit = null;
+        readContacts().forEach(function (c) { if (!hit && String(c.name).toLowerCase() === String(m.name).trim().toLowerCase() && String(c.email || '') === mail) hit = c; });
+        if (hit) return;                      // 이미 기억한 이름·이메일
+        Store.rememberContact(m.name, mail, { quiet: true });
+        n++;
+      });
+    });
+    return n;
+  };
+  /** 입력한 글자로 지난 일행 후보 (순수 매칭은 Core.contactMatch) */
+  Store.contactSuggest = function (query, limit) {
+    return Core.contactMatch(readContacts(), query, limit);
+  };
+  Store.forgetContacts = function () { writeContacts([]); return 0; };
   /** 내 Firebase 설정 저장. null(또는 쓸 수 없는 값)이면 기본 내장 설정으로 되돌린다. */
   Store.setFirebase = function (cfg) {
     var next = (cfg && typeof cfg === 'object' && cfg.projectId) ? Object.assign({}, cfg) : null;
@@ -410,6 +560,22 @@
     for (var i = 0; trip && i < (trip.members || []).length; i++) if (trip.members[i].id === id) return trip.members[i];
     return null;
   };
+  /** v28: '이 사람이 나'라고 정하면서 계정(uid·이메일)까지 연결한다
+      · 기기 설정(meByTrip)만 바꾸고 계정 연결이 빠지면 방 목록·정산에서 다른 사람으로 보인다 */
+  Store.claimMe = function (tripId, memberId) {
+    var trip = Store.trip(tripId);
+    if (!trip) return null;
+    var target = null;
+    (trip.members || []).forEach(function (m) { if (m.id === memberId) target = m; });
+    if (!target) return null;
+    if (Core.memberTakenByOther(target, currentUser())) { stateError = 'taken'; return null; }
+    Store.setMeMember(tripId, memberId);
+    if (Store.canWrite()) {
+      var linked = Store.linkMe(tripId, memberId);   // 로그인 상태면 uid·이메일도 함께 저장
+      if (linked) target = linked;
+    }
+    return target;
+  };
   Store.memberStats = function (trip, memberId) {
     var paidCount = 0, paidSum = 0, spent = 0;
     ((trip && trip.data && trip.data.expenses) || []).forEach(function (e) {
@@ -451,10 +617,21 @@
     name = (name || '').trim();
     if (!name) return null;
     var mail = String(email == null ? '' : email).trim().toLowerCase();
-    for (var i = 0; i < trip.members.length; i++) if (trip.members[i].name === name) return trip.members[i];
+    for (var i = 0; i < trip.members.length; i++) {
+      if (trip.members[i].name !== name) continue;
+      // v28: 같은 이름이면 새로 만들지 않는다 — 받은 이메일을 그 일행에 붙인다
+      var same = trip.members[i];
+      if (mail && !same.email && !same.uid) {
+        same.email = mail;
+        pushMeta(trip, ['members']);
+        notify();
+      }
+      return same;
+    }
     var m = { id: Core.uid('m'), name: name };
     if (mail) m.email = mail;
     trip.members = trip.members.concat([m]);
+    if (Store.rememberContact) Store.rememberContact(name, mail);   // v28: 지난 일행 자동완성 (이 기기에만)
     pushMeta(trip, ['members']);
     notify();
     return m;
@@ -487,6 +664,9 @@
       if (mail) target.email = mail; else delete target.email;
     }
     if (p.uid != null) { if (p.uid) target.uid = String(p.uid); else delete target.uid; }
+    if (p.name != null || p.email != null) {
+      try { if (Store.rememberContact) Store.rememberContact(target.name, target.email || ''); } catch (e) {}
+    }
     pushMeta(trip, ['members']);
     notify();
     return { ok: true, member: target };
@@ -502,6 +682,16 @@
     opts = opts || {};
     var ms = trip.members || [];
     var found = null;
+    // v28: 화면에서 고른 일행(memberId)이 있으면 그 사람으로 — 이름 충돌로 남의 자리를 빼았지 않는다
+    if (opts.memberId) ms.forEach(function (m) { if (!found && m.id === opts.memberId) found = m; });
+    if (found) {
+      if (Core.memberTakenByOther(found, acct)) { stateError = 'taken'; return null; }
+      var dirty0 = false;
+      if (!found.uid) { found.uid = acct.uid; dirty0 = true; }
+      if (!found.email && acct.email) { found.email = String(acct.email).toLowerCase(); dirty0 = true; }
+      if (dirty0) { pushMeta(trip, ['members']); notify(); }
+      return found;
+    }
     ms.forEach(function (m) { if (!found && Core.memberMatches(m, acct)) found = m; });
     if (found) {
       var dirty = false;
@@ -535,6 +725,8 @@
     var target = null;
     (trip.members || []).forEach(function (m) { if (m.id === memberId) target = m; });
     if (!target) return null;
+    // 이미 다른 사람 계정이 붙은 일행은 빼앗지 않는다 (v28)
+    if (Core.memberTakenByOther(target, acct)) { stateError = 'taken'; return null; }
     var dirty = false;
     if (!target.uid) { target.uid = acct.uid; dirty = true; }
     if (!target.email && acct.email) { target.email = String(acct.email).toLowerCase(); dirty = true; }
@@ -635,6 +827,29 @@
     if (!Array.isArray(trip.data[coll])) trip.data[coll] = [];
     return trip.data[coll];
   }
+  /** v28: 일정 하나를 그 날의 시간순 자리에 넣고 order를 0..n-1로 다시 매긴다
+      · 같은 시간이면 먼저 있던 일정 뒤에 · 시간 없는 일정은 뒤로
+      · 바뀐 다른 일정은 실시간 공유 중이면 바로 올린다 */
+  function placeScheduleByTime(trip, item) {
+    if (!trip || !item) return -1;
+    var day = Core.sortedSchedules(trip.data, item.dayKey).filter(function (x) { return x.id !== item.id; });
+    var idx = Core.insertIndexByTime(day, item);
+    day.splice(idx, 0, item);
+    day.forEach(function (x, i) {
+      if (x.order === i) return;
+      x.order = i;
+      if (trip.remoteCode && x.id !== item.id) remoteWrite(trip, [trip.remoteCode, 'schedules', x.id], stripId(x));
+    });
+    return idx;
+  }
+  Store.placeScheduleByTime = function (tripId, itemId) {
+    var trip = Store.trip(tripId);
+    if (!trip || !itemId) return -1;
+    var it = null;
+    (trip.data.schedules || []).forEach(function (s) { if (s.id === itemId) it = s; });
+    if (!it) return -1;
+    return placeScheduleByTime(trip, it);
+  };
   Store.add = function (tripId, coll, item) {
     if (!Store.canWrite()) { denyLogin(); return null; }
     var trip = Store.trip(tripId);
@@ -645,8 +860,13 @@
     it.id = it.id || Core.uid(coll.charAt(0));
     it.createdAt = it.createdAt || new Date().toISOString();
     if (it.id) clearTomb(trip, coll, it.id);   // 같은 id로 새로 넣는 것은 되살리기가 아니라 새 항목이다
-    if (!isFinite(it.order)) it.order = list.filter(function (x) { return x.dayKey === it.dayKey; }).length;
+    var hadOrder = isFinite(item && item.order);   // 순서를 직접 준 경우(복원·시드)는 그대로 둔다
     list.push(it);
+    if (coll === 'schedules' && !hadOrder) {
+      placeScheduleByTime(trip, it);           // v28: 추가한 순서가 아니라 시간순 자리로
+    } else if (!isFinite(it.order)) {
+      it.order = list.filter(function (x) { return x.id !== it.id && x.dayKey === it.dayKey; }).length;
+    }
     if (trip.remoteCode) remoteWrite(trip, [trip.remoteCode, coll, it.id], stripId(it));
     notify();
     return it;
@@ -661,11 +881,14 @@
       if (list[i].id !== id) continue;
       var prev = list[i];
       var next = Object.assign({}, prev, patch);
-      // 다른 날로 옮기면 그 날의 맨 뒤로 보낸다
-      if (coll === 'schedules' && patch.dayKey && patch.dayKey !== prev.dayKey) {
+      var movedDay = coll === 'schedules' && !!patch.dayKey && patch.dayKey !== prev.dayKey;
+      var timeChanged = coll === 'schedules' && patch.time !== undefined && Core.normTime(patch.time) !== Core.normTime(prev.time);
+      // 다른 날로 옮기면 그 날의 맨 뒤로 보낸다 (시간이 있으면 아래에서 시간순 자리로 다시 잡힌다)
+      if (movedDay) {
         next.order = list.filter(function (x) { return x !== prev && x.dayKey === patch.dayKey; }).length;
       }
       list[i] = next;
+      if (movedDay || timeChanged) placeScheduleByTime(trip, next);   // v28
       if (trip.remoteCode) remoteWrite(trip, [trip.remoteCode, coll, id], stripId(next));
       notify();
       return next;
@@ -1065,7 +1288,8 @@
     return loadFb().then(function (fsMod) {
       var code = opts.code || trip.remoteCode || Core.inviteCode();
       trip.remoteCode = code;
-      trip.inviteCode = code;
+      if (opts.invite) trip.inviteCode = normalizeCode(opts.invite);
+      trip.inviteCode = normalizeCode(trip.inviteCode) || code;   // v28: 지금 유효한 초대 코드
       closeConn();
       conn = { code: code, tripId: trip.id, unsubs: [], metaReady: false, serverReady: {} };
       // 기존 방에 다시 붙는 경우: 첫 스냅샷이 오기 전에는 기기에 있던 목록을 서버로 밀어 올리지 않는다
@@ -1114,6 +1338,18 @@
           }
           Store.setFromCache(cached);
           var m = snap.data() || {};
+          /* v28: 초대 코드로 들어온 경우, 방 문서의 지금 초대 코드와 다르면(재발급된 예전 링크)
+             들어오지 않는다. 이미 들어온 기기는 remoteCode로 붙을 뿐 opts.invite가 없어 영향이 없다. */
+          if (!opts.create && opts.invite) {
+            var invNow = normalizeCode(m.inviteCode);
+            if (invNow && invNow !== normalizeCode(opts.invite)) {
+              closeConn();
+              var rev = new Error(Store.REVOKED_MESSAGE);
+              rev.code = 'revoked';
+              done(rev);
+              return;
+            }
+          }
           trip.name = m.name || trip.name;
           trip.destination = m.destination || trip.destination;
           trip.startDate = m.startDate || trip.startDate;
@@ -1125,6 +1361,8 @@
           //      로그인해도 방장 권한(일행 관리·방 삭제)이 그대로 동작한다
           if (m.ownerUid) trip.ownerUid = String(m.ownerUid);
           if (m.ownerEmail) trip.ownerEmail = String(m.ownerEmail).toLowerCase();
+          // v28: 다른 기기(방장)가 새로 발급한 초대 코드를 받아 둔다 — 공유할 때 새 링크가 나간다
+          if (m.inviteCode) trip.inviteCode = normalizeCode(m.inviteCode);
           // 다른 기기가 남긴 삭제 기록도 받아들인다 (늦은 쓰기로 되살아난 항목을 다시 숨긴다)
           if (Array.isArray(m.deletedKeys)) {
             m.deletedKeys.forEach(function (d) {
@@ -1448,20 +1686,56 @@
     });
   };
 
-  /** 초대 코드로 참여: 로컬에 여행 자리를 만들고 구독한다. opts.silent면 화면 전환·닉네임 변경 없이 목록에만 더한다. */
+  /** 초대 코드로 참여: 로컬에 여행 자리를 만들고 구독한다. opts.silent면 화면 전환·닉네임 변경 없이 목록에만 더한다.
+      v28: 코드를 먼저 방 문서로 풀어 본다 — 재발급된 새 코드는 별칭 문서(triplog_meta/join-<코드>)를 거치고,
+      방장이 새 코드를 발급한 뒤의 예전 코드로는 들어올 수 없다. */
   Store.joinByCode = function (code, nickname, opts) {
     opts = opts || {};
     if (!Store.canWrite()) {
       denyLogin();
       return Promise.reject(Object.assign(new Error('로그인이 필요해요'), { code: 'need-login' }));
     }
-    code = String(code || '').trim().toUpperCase();
-    if (!/^[A-Z0-9]{4,10}$/.test(code)) return Promise.reject(new Error('초대 코드는 영문·숫자 4~10자리입니다.'));
+    var c = normalizeCode(code);
+    if (!/^[A-Z0-9]{4,10}$/.test(c)) return Promise.reject(new Error('초대 코드는 영문·숫자 4~10자리입니다.'));
     if (nickname && !opts.silent) Store.setNickname(nickname);
+    return Promise.resolve().then(function () { return loadFb(); }).then(function (fsMod) {
+      return resolveInvite(fsMod, c);
+    }).then(function (res) {
+      if (!res.ok) {
+        var revoked = res.reason === 'revoked';
+        var e = new Error(revoked ? Store.REVOKED_MESSAGE : GONE_MESSAGE);
+        e.code = revoked ? 'revoked' : (res.reason === 'net' ? 'network' : 'notfound');
+        // 서버가 '없는 방'이라고 확인했으면 기기에 캐시로 남은 사본도 치운다
+        if (!revoked && res.reason !== 'net') { closeConn(); dropLocalByCode(c); }
+        throw e;
+      }
+      return openRoom(res.room, res.invite, opts);
+    });
+  };
+  /** 초대 코드(지금 코드·예전 코드)로 이 기기에 남은 여행 사본을 치운다 */
+  function dropLocalByCode(code) {
+    var c = normalizeCode(code);
+    if (!c) return 0;
+    var ids = [];
+    state.trips = state.trips.filter(function (t) {
+      var hit = normalizeCode(t.remoteCode) === c || normalizeCode(t.inviteCode) === c;
+      if (hit && t.id) ids.push(t.id);
+      return !hit;
+    });
+    ids.forEach(function (id) { if (state.meByTrip) delete state.meByTrip[id]; });
+    if (state.currentTripId && ids.indexOf(state.currentTripId) >= 0) state.currentTripId = null;
+    try { if (TL.Account && TL.Account.forget) TL.Account.forget(c); } catch (e) {}
+    notify();
+    return ids.length;
+  }
+  /** 확인된 방 코드(room)로 이 기기의 여행 자리를 만들고 구독한다. invite는 사용자가 누른 초대 코드 */
+  function openRoom(code, invite, opts) {
+    var room = normalizeCode(code);
+    var used = normalizeCode(invite) || room;
     var existing = null;
-    state.trips.forEach(function (t) { if (t.remoteCode === code) existing = t; });
+    state.trips.forEach(function (t) { if (normalizeCode(t.remoteCode) === room) existing = t; });
     var trip = existing || {
-      id: 'remote_' + code,
+      id: 'remote_' + room,
       name: '여행을 불러오는 중…',
       destination: '',
       startDate: Core.todayISO(),
@@ -1469,10 +1743,12 @@
       baseCurrency: 'KRW',
       members: [],
       rates: {},
-      remoteCode: code,
+      remoteCode: room,
+      inviteCode: used,
       createdAt: new Date().toISOString(),
       data: { schedules: [], expenses: [], checklist: [], reservations: [] }
     };
+    if (existing) { existing.remoteCode = room; existing.inviteCode = used; }
     if (!existing) state.trips.push(trip);
     /* 이미 이 기기에 있던 여행으로 다시 들어오는 경우:
        기기에 캐시된 예전 항목(다른 곳에서 지운 일정·지출 등)이 되살아나거나 다시 업로드되지 않도록
@@ -1486,19 +1762,26 @@
     var prevCurrent = state.currentTripId;
     if (!opts.silent) state.currentTripId = trip.id;
     notify();
-    return Store.connect(trip.id, { code: code }).then(function () {
-      // 일행 목록에 내가 있는지는 사용자가 직접 고른다 (Dialogs.whoAmI)
+    return Store.connect(trip.id, { code: room, invite: used }).then(function () {
+      // 일행 목록에 내가 있는지는 사용자가 직접 고른다 (Dialogs.afterJoin / joinChoice)
       trip.hydrating = false;
       notify();
       return trip;
     }).catch(function (e) {
-      var dead = !!(e && e.code === 'notfound');
+      if (e && e.code === 'revoked' && existing) {
+        // 이미 이 기기에 있던 방 — 예전 링크를 눌렀어도 내 여행은 지우지 않는다
+        if (prevData) existing.data = prevData;
+        existing.hydrating = false;
+        notify();
+        throw e;
+      }
+      var dead = !!(e && (e.code === 'notfound' || e.code === 'revoked'));
       if (dead) {
         /* 서버가 '없거나 폭파된 방'이라고 확인했다 — 기기에 캐시로 남아 있던 이 방도 함께 지운다 */
         state.trips = state.trips.filter(function (t) { return t.id !== trip.id && t !== existing; });
         if (state.currentTripId === trip.id) state.currentTripId = (prevCurrent === trip.id ? null : prevCurrent);
         if (state.meByTrip) delete state.meByTrip[trip.id];
-        try { if (TL.Account && TL.Account.forget) TL.Account.forget(code); } catch (x) {}
+        try { if (TL.Account && TL.Account.forget) TL.Account.forget(room); } catch (x) {}
       } else if (!existing) {
         state.trips = state.trips.filter(function (t) { return t.id !== trip.id; });
         state.currentTripId = prevCurrent;
@@ -1509,7 +1792,7 @@
       notify();
       throw e;
     });
-  };
+  }
 
   /* ---------------------------------------------------- backup / restore */
   /** 내보내기: 방장·일행 계정 연결 정보까지 함께 담는다

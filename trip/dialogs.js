@@ -23,7 +23,10 @@
     return '<div class="members-pick" id="member-list">' + memberChipsHtml() + '</div>' +
       '<div class="inline-add"><input class="input" id="member-new" placeholder="일행 이름 (예: 아내)" maxlength="12" autocomplete="off" enterkeyhint="done">' +
       '<button type="button" class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="add-member-chip">' + UI.icon('plus', 16) + '추가</button></div>' +
-      '<div class="hintline">이름을 넣고 <b>추가</b>(또는 Enter)를 누르면 색 배지로 붙어요. 배지의 × 를 누르면 빠져요.</div>';
+      '<div class="ct-suggest hide" id="member-suggest"></div>' +
+      '<div class="hintline" id="member-mail-hint"></div>' +
+      '<div class="hintline">이름을 넣고 <b>추가</b>(또는 Enter)를 누르면 색 배지로 붙어요. 배지의 × 를 누르면 빠져요. ' +
+        '지난 여행에서 함께한 일행은 <b>한 글자만 쳐도</b> 후보가 떠요(내 기기에만 저장).</div>';
   }
   function refreshMemberList() {
     var el = document.getElementById('member-list');
@@ -46,7 +49,7 @@
     var today = Core.todayISO();
     var nick = Store.settings().nickname;
     var start = Core.addDays(today, 7), end = Core.addDays(today, 9);
-    dlg = { kind: 'new-trip', members: [{ id: Core.uid('m'), name: nick || '나' }], id: null };
+    dlg = { kind: 'new-trip', members: [{ id: Core.uid('m'), name: nick || '나' }], id: null, memberEmails: {} };
     dlg.meId = dlg.members[0].id;
     D.trip = null;
     cal = { open: false, month: Core.monthKeyOf(start), start: start, end: end };
@@ -73,7 +76,13 @@
     if (!name) { UI.toast('여행 이름을 입력해 주세요'); return; }
     var chk = Core.checkRange(cal.start, cal.end || cal.start);
     if (!chk.ok) { UI.toast(chk.error); cal.open = true; renderRangeField(); return; }
-    var members = dlg.members.length ? dlg.members : [{ id: Core.uid('m'), name: Store.settings().nickname || '나' }];
+    var members = (dlg.members.length ? dlg.members : [{ id: Core.uid('m'), name: Store.settings().nickname || '나' }]).map(function (m) {
+      var o = { id: m.id, name: m.name };
+      var mail = (dlg.memberEmails || {})[m.name] || m.email;
+      if (mail) o.email = String(mail).trim().toLowerCase();
+      if (m.uid) o.uid = m.uid;
+      return o;
+    });
     var trip = Store.createTrip({
       name: name,
       destination: UI.val('f_dest').trim(),
@@ -92,7 +101,8 @@
 
   /* ======================================================== 여행 정보 수정 */
   D.editTrip = function (trip) {
-    dlg = { kind: 'edit-trip', members: (trip.members || []).slice(), id: trip.id, trip: trip };
+    dlg = { kind: 'edit-trip', members: (trip.members || []).slice(), id: trip.id, trip: trip, memberEmails: {} };
+    (trip.members || []).forEach(function (m) { if (m && m.email) dlg.memberEmails[m.name] = m.email; });
     dlg.meId = Store.meId(trip, (trip.members[0] || {}).id);
     D.trip = trip;
     cal = { open: false, month: Core.monthKeyOf(trip.startDate), start: trip.startDate, end: trip.endDate || trip.startDate };
@@ -116,7 +126,13 @@
     var name = UI.val('f_name').trim() || trip.name;
     var chk = Core.checkRange(cal.start || trip.startDate, cal.end || trip.endDate || trip.startDate);
     if (!chk.ok) { UI.toast(chk.error); cal.open = true; renderRangeField(); return; }
-    var members = dlg.members.length ? dlg.members : trip.members;
+    var members = (dlg.members.length ? dlg.members : trip.members).map(function (m) {
+      var o = { id: m.id, name: m.name };
+      var mail = (dlg.memberEmails || {})[m.name] || m.email;
+      if (mail) o.email = String(mail).trim().toLowerCase();
+      if (m.uid) o.uid = m.uid;
+      return o;
+    });
     // 폼에서 빠진 일행은 지출·준비물 참조까지 정리한다
     (trip.members || []).forEach(function (m) {
       if (!members.some(function (x) { return x.id === m.id; })) Store.removeMember(trip.id, m.id);
@@ -212,9 +228,13 @@
     if (v.length > 12) { UI.toast('이름은 12자까지 쓸 수 있어요'); return; }
     if (dlg.members.some(function (m) { return m.name === v; })) { UI.toast('이미 있는 이름이에요'); if (el) el.select(); return; }
     var m = { id: Core.uid('m'), name: v };
+    var mail = (dlg.memberEmails || {})[v];
+    if (mail) m.email = mail;                                   // v28: 자동완성으로 고른 일행의 이메일
     dlg.members.push(m);
+    if (Store.rememberContact) Store.rememberContact(v, mail || '');
     if (!dlg.meId) dlg.meId = m.id;
     if (el) { el.value = ''; el.focus(); }
+    D.showContactSuggest('member-new', '');
     refreshMemberList();
   };
   A['del-member-chip'] = function (el) {
@@ -223,6 +243,61 @@
     dlg.members = dlg.members.filter(function (m) { return m.id !== id; });
     if (dlg.meId === id) dlg.meId = dlg.members[0].id;
     refreshMemberList();
+  };
+
+  /* ================================ v28: 지난 일행 한 글자 자동완성 (이 기기에만)
+     이름 입력창에 한 글자만 쳐도 지난 여행에서 함께한 일행이 후보로 뜨고, 고르면 이메일도 함께 채워진다.
+     저장은 Store가 localStorage('triplog.contacts.v1')에만 한다 — 방 문서·계정으로 나가지 않는다. */
+  var CT_BOXES = { 'member-new': 'member-suggest', 'mem-new': 'mem-suggest' };
+  D.contactSuggestHtml = function (target, query) {
+    var list = Store.contactSuggest ? Store.contactSuggest(query, 5) : [];
+    if (!list.length) return '';
+    return '<div class="ct-head">지난 일행</div>' + list.map(function (c) {
+      return '<button type="button" class="ct-row" data-action="ct-pick" data-target="' + UI.esc(target) + '"' +
+        ' data-name="' + UI.esc(c.name) + '" data-email="' + UI.esc(c.email || '') + '">' +
+        UI.avatar(c.name, 'sm') +
+        '<span class="ct-tx"><b>' + UI.esc(c.name) + '</b>' +
+        (c.email ? '<small>' + UI.esc(c.email) + '</small>' : '<small>이메일 없음</small>') + '</span>' +
+        (c.count > 1 ? '<span class="ct-n">' + c.count + '회</span>' : '') + '</button>';
+    }).join('');
+  };
+  /** 입력창 아래 후보 목록을 그린다 (빈 검색어면 감춘다). 후보 수를 돌려준다 */
+  D.showContactSuggest = function (target, query) {
+    var box = document.getElementById(CT_BOXES[target] || 'member-suggest');
+    if (!box) return 0;
+    var q = query == null ? '' : String(query);
+    var n = (Store.contactSuggest ? Store.contactSuggest(q, 5) : []).length;
+    var html = n ? D.contactSuggestHtml(target, q) : '';
+    box.innerHTML = html;
+    if (box.classList && box.classList.toggle) box.classList.toggle('hide', !html);
+    return n;
+  };
+  A['ct-pick'] = function (el) {
+    var target = el.getAttribute('data-target') || 'member-new';
+    var name = el.getAttribute('data-name') || '';
+    var email = el.getAttribute('data-email') || '';
+    var nameEl = document.getElementById(target);
+    if (nameEl) { nameEl.value = name; if (nameEl.focus) nameEl.focus(); }
+    if (target === 'member-new') {
+      if (!dlg.memberEmails) dlg.memberEmails = {};
+      if (email) dlg.memberEmails[name] = email;
+      var hint = document.getElementById('member-mail-hint');
+      if (hint) hint.textContent = email
+        ? '✓ ' + name + ' · ' + email + ' 을 기억하고 있어요. 추가를 누르면 이메일도 함께 저장돼요.'
+        : '✓ ' + name + ' (저장된 이메일 없음) — 추가를 누르면 이름만 저장돼요.';
+    } else {
+      var mailEl = document.getElementById('mem-email');
+      if (mailEl) mailEl.value = email;
+    }
+    D.showContactSuggest(target, '');
+    UI.toast(email ? name + ' · ' + email : name + ' 선택', 1800);
+  };
+  /** 자동완성 후보를 지운다 (입력창을 벗어나거나 추가했을 때) */
+  D.hideContactSuggest = function (target) {
+    var box = document.getElementById(CT_BOXES[target] || 'member-suggest');
+    if (!box) return;
+    box.innerHTML = '';
+    if (box.classList && box.classList.add) box.classList.add('hide');
   };
 
   /* ------------------------------------------------- 달력(기간 선택) */
@@ -302,13 +377,15 @@
     if (!trip) return;
     mem = { trip: trip, editing: '' };
     var canManage = isMemberOwner(trip);
-    var html = '<div class="note">이름을 누르면 <b>내 이름</b>으로 지정돼요. 내가 결제자 기본값이 되고 정산에 ‘나’로 쓰여요.</div>' +
+    var html = '<div class="note">이름을 누르면 <b>내 이름</b>으로 지정되고, 로그인한 계정(이메일)도 그 일행에 연결돼요. 내가 결제자 기본값이 되고 정산에 ‘나’로 쓰여요.</div>' +
       '<div class="mem-rows" id="mem-rows">' + memRows(trip) + '</div>';
     if (canManage) {
       html += '<div class="inline-add" style="margin-top:12px"><input class="input" id="mem-new" placeholder="일행 이름 (예: 아내)" maxlength="12" autocomplete="off" enterkeyhint="done">' +
         '<button type="button" class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="mem-add">' + UI.icon('plus', 16) + '추가</button></div>' +
+        '<div class="ct-suggest hide" id="mem-suggest"></div>' +
         '<div class="inline-add" style="margin-top:8px"><input class="input" id="mem-email" type="email" inputmode="email" placeholder="이메일 (선택) · 그 사람 계정과 연결" autocomplete="off"></div>' +
         '<div class="hintline">이메일을 넣으면 그 사람이 이 계정으로 로그인했을 때 자동으로 이 일행으로 연결돼요.</div>' +
+        '<div class="hintline">지난 여행에서 함께한 일행은 이름을 <b>한 글자만</b> 쳐도 후보가 떠요(내 기기에만 저장).</div>' +
         '<div class="hintline">실시간 공유 중이면 이름 변경과 추가가 일행 모두에게 보여요.</div>';
     } else {
       html += '<div class="lock-note">' + UI.icon('lock', 16) + '<span><b>방장만 일행을 추가·수정·삭제할 수 있어요.</b><br>' +
@@ -333,6 +410,7 @@
     if (!m) { UI.toast('일행을 추가하지 못했어요 · 이름을 확인해 주세요'); return; }
     if (el) { el.value = ''; el.focus(); }
     if (mailEl) mailEl.value = '';
+    D.showContactSuggest('mem-new', '');
     refreshMemRows();
     UI.toast(m.name + (m.email ? ' · ' + m.email + ' 연결' : '') + ' 추가했어요', 2600);
   };
@@ -340,9 +418,14 @@
     var trip = mem.trip;
     var id = el.getAttribute('data-id');
     if (!trip) return;
-    Store.setMeMember(trip.id, id);
-    var m = Store.myMember(trip);
-    if (m) { Store.setNickname(m.name); UI.toast(m.name + ' 님으로 설정했어요'); }
+    var m = Store.claimMe(trip.id, id);   // v28: '나' 지정 + 내 계정(uid·이메일) 연결
+    if (!m) {
+      var deny = Store.takeError();
+      UI.toast(deny === 'taken' ? '이 일행은 다른 계정에 연결돼 있어요 · 새 일행으로 추가해 주세요' : '내 이름으로 지정하지 못했어요', 3000);
+      return;
+    }
+    Store.setNickname(m.name);
+    UI.toast(m.name + ' 님으로 설정했어요' + (Store.signedIn() ? ' · 내 계정을 연결했어요' : ''), 2600);
     refreshMemRows();
   };
   A['mem-edit'] = function (el) {
@@ -411,13 +494,14 @@
     var trip = mem.trip;
     var id = el.getAttribute('data-id');
     if (!trip) return;
-    Store.setMeMember(trip.id, id);
-    Store.linkMe(trip.id, id);   // 이 일행에 내 계정(uid·이메일)을 연결해 본인 확인이 되게 한다
-    var m = Store.myMember(trip);
-    if (m) {
-      if (!Store.settings().nickname) Store.setNickname(m.name);
-      UI.toast(m.name + ' 님으로 설정했어요');
+    var m = Store.claimMe(trip.id, id);   // v28: 이 일행에 내 계정(uid·이메일)도 연결
+    if (!m) {
+      var deny = Store.takeError();
+      UI.toast(deny === 'taken' ? '이 일행은 다른 계정에 연결돼 있어요 · 새 일행으로 추가해 주세요' : '설정하지 못했어요', 3000);
+      return;
     }
+    if (!Store.settings().nickname) Store.setNickname(m.name);
+    UI.toast(m.name + ' 님으로 설정했어요');
     UI.close();
   };
   A['who-join'] = function () {
@@ -434,22 +518,101 @@
     UI.close();
     UI.toast(v + ' 님으로 합류했어요');
   };
-  /** 초대 링크로 들어온 로그인 사용자: 이메일·이름으로 나를 찾거나 새로 합류시킨다 */
-  D.joinSelf = function (trip, name) {
+  /** 초대 링크로 들어온 로그인 사용자: 이메일·이름으로 나를 찾거나 선택 시트를 띄운다 */
+  D.joinSelf = function (trip, name) { return D.afterJoin(trip, { name: name }); };
+  /**
+   * v28: 초대 링크로 들어온 직후 — 내가 누구인지 정하고 계정을 연결한다.
+   *  · 이메일·uid로 이미 연결된 일행 → 그 사람
+   *  · 같은 이름의 일행(아직 계정 미연결) → 그 사람 (기기 별명이 일행 이름과 같아도 놓치지 않는다)
+   *  · 그 외 → 확인 질문/선택 시트 (기존 일행 중 본인 / 새 일행으로 추가) → 정하지 못하면 null
+   */
+  D.afterJoin = function (trip, opts) {
     if (!trip || !Store.signedIn()) return null;
-    var acct = TL.Auth.currentUser();
-    var found = null;
-    (trip.members || []).forEach(function (m) { if (!found && Core.memberMatches(m, acct)) found = m; });
-    if (!found) {
-      var nick = String(name || '').trim() || Store.settings().nickname || Core.accountLabel(acct);
-      (trip.members || []).forEach(function (m) { if (!found && m.name === nick) found = m; });
+    var acct = Store.currentUser();
+    var name = String((opts && opts.name) || Store.settings().nickname || '').trim() || Core.accountLabel(acct);
+    var plan = Core.joinPlan(trip, acct, { name: name });
+    if (plan.action === 'linked' || plan.action === 'link-name') {
+      var m = Store.claimMe(trip.id, plan.memberId);
+      if (m) {
+        if (!Store.settings().nickname) Store.setNickname(m.name);
+        if (plan.action === 'link-name') UI.toast('기존 일행 ‘' + m.name + '’ 님으로 연결했어요 · 정산도 한 사람으로 모여요', 3000);
+        return m;
+      }
     }
-    var m = found || Store.joinAsMember(trip.id, { name: name || '' });
-    if (m) {
-      Store.setMeMember(trip.id, m.id);
-      Store.linkMe(trip.id, m.id);
+    D.joinChoice(trip, plan, { name: name });
+    return null;
+  };
+  /** 고른 일행에 내 계정을 연결하고 여행 화면으로 */
+  function finishJoin(trip, member, msg) {
+    if (!trip) return;
+    UI.close();
+    UI.toast(msg || (member ? member.name + ' 님으로 연결했어요' : '참여했어요'), 2800);
+    if (TL.App && TL.App.openTrip) TL.App.openTrip(trip.id, 'schedule');
+  }
+  /** 선택 시트: 기존 일행 중 본인 / 새 일행으로 추가 (중복 등록을 막는다) */
+  D.joinChoice = function (trip, plan, opts) {
+    if (!trip) return;
+    mem = { trip: trip, editing: '' };
+    dlg = { kind: 'join', trip: trip, id: null };
+    D.trip = trip;
+    plan = plan || Core.joinPlan(trip, Store.currentUser(), { name: (opts && opts.name) || Store.settings().nickname });
+    var ms = trip.members || [];
+    var acct = Store.currentUser();
+    var myName = String((opts && opts.name) || Store.settings().nickname || Core.accountLabel(acct)).trim();
+    var html = '<div class="note">초대받은 여행이에요. <b>일행 중에 내가 누구인지</b> 골라 주세요. ' +
+      '고른 일행에 내 계정이 연결되면 정산이 한 사람으로 모이고, 이 여행이 내 목록에도 나타나요.</div>';
+    if (plan.sameName) html += '<div class="hintline">같은 이름의 일행이 있어요 — 본인이면 아래에서 눌러 주세요.</div>';
+    if (ms.length) {
+      html += '<div class="mem-rows" id="join-list">' + ms.map(function (m) {
+        return '<div class="mrow" data-id="' + UI.esc(m.id) + '">' +
+          '<button type="button" class="mem-main" data-action="join-pick" data-id="' + UI.esc(m.id) + '">' +
+            UI.avatar(m.name, 'lg') +
+            '<span class="tx"><b>' + UI.esc(m.name) + (m.id === plan.sameName ? ' <span class="me-tag">같은 이름</span>' : '') + '</b>' +
+              '<small>' + UI.esc(Core.memberSubLabel(m, acct)) + '</small></span>' +
+          '</button></div>';
+      }).join('') + '</div>';
     }
-    return m;
+    html += '<div class="form-row mt12"><label class="fl">목록에 없어요 · 새 일행으로 추가</label>' +
+      '<div class="inline-add" style="margin-top:0"><input class="input" id="join-new-name" placeholder="내 이름" maxlength="12" value="' + UI.esc(myName) + '" autocomplete="off">' +
+      '<button type="button" class="btn btn-soft" style="width:auto;height:44px;padding:0 14px;flex:none" data-action="join-new">추가</button></div>' +
+      '<div class="hintline">이미 목록에 있는데 새로 추가하면 정산이 두 사람으로 갈라져요. 내가 이미 있으면 위에서 골라 주세요.</div></div>' +
+      '<div class="sheet-foot"><button class="btn btn-ghost" data-action="join-later">나중에</button></div>';
+    open(html, '나는 누구인가요?');
+  };
+  A['join-pick'] = function (el) {
+    var trip = (dlg && dlg.kind === 'join' && dlg.trip) || mem.trip;
+    var id = el.getAttribute('data-id');
+    if (!trip || !id) return;
+    if (!UI.requireLogin('로그인해야 여행에 참여할 수 있어요')) return;
+    var m = Store.claimMe(trip.id, id);
+    if (!m) {
+      var deny = Store.takeError();
+      UI.toast(deny === 'taken' ? '이 일행은 다른 계정에 연결돼 있어요 · 새 일행으로 추가해 주세요' : '연결하지 못했어요', 3000);
+      return;
+    }
+    Store.setNickname(m.name);
+    finishJoin(trip, m, m.name + ' 님으로 연결했어요 · 정산도 한 사람으로 모여요');
+  };
+  A['join-new'] = function () {
+    var trip = (dlg && dlg.kind === 'join' && dlg.trip) || mem.trip;
+    var el = document.getElementById('join-new-name');
+    var v = el ? String(el.value || '').trim() : '';
+    if (!trip) return;
+    if (!UI.requireLogin('로그인해야 여행에 참여할 수 있어요')) return;
+    if (!v) { if (el) el.focus(); UI.toast('내 이름을 입력해 주세요'); return; }
+    var m = Store.joinAsMember(trip.id, { name: v });
+    if (!m) { UI.toast('합류하지 못했어요 · 로그인을 확인해 주세요', 3000); return; }
+    Store.setMeMember(trip.id, m.id);
+    Store.linkMe(trip.id, m.id);
+    Store.setNickname(m.name);
+    if (Store.rememberContact) Store.rememberContact(m.name, '');
+    finishJoin(trip, m, v + ' 님으로 합류했어요');
+  };
+  A['join-later'] = function () {
+    var trip = (dlg && dlg.kind === 'join' && dlg.trip) || mem.trip;
+    UI.close();
+    if (trip && TL.App && TL.App.goHome) TL.App.goHome();
+    UI.toast('일행 중 나를 고르면 이 여행이 내 목록에 보여요 · 초대 링크로 다시 열 수 있어요', 3600);
   };
 
   /* ============================================================== 일정 */
@@ -1836,7 +1999,7 @@
   function b64url(str) { return Core.b64urlEncode(str); }
   function shareUrl(trip) {
     var base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    var code = trip.remoteCode;
+    var code = Store.inviteCodeOf(trip);            // v28: 지금 유효한 초대 코드 (재발급되면 바뀔다)
     var q = '?trip=' + encodeURIComponent(code);
     // 내 Firebase로 바꾼 경우에만 설정을 링크에 담는다 (기본 프로젝트는 앱에 들어 있어 필요 없음)
     var cfg = Store.customFirebase();
@@ -1849,14 +2012,17 @@
     var html = '';
     if (trip.remoteCode) {
       var url = shareUrl(trip);
+      var invite = Store.inviteCodeOf(trip);
+      var owner = false;
+      try { owner = Core.canManageMembers(trip, TL.Auth && TL.Auth.currentUser ? TL.Auth.currentUser() : null); } catch (e) {}
       html += '<div class="note" style="text-align:center;background:linear-gradient(160deg,#EAF2FF,#E4FAF6);border:0">' +
         '<div class="tiny" style="font-weight:700;color:#2A74DB">초대 코드</div>' +
-        '<div class="invite-code">' + UI.esc(trip.remoteCode) + '</div>' +
+        '<div class="invite-code">' + UI.esc(invite) + '</div>' +
         '<div class="badge-line" style="justify-content:center"><span class="dot-live"></span>일행과 실시간으로 함께 쓰는 중</div>' +
       '</div>';
       html += '<div class="form-row mt12"><label class="fl">초대 링크</label>' +
         '<div class="share-link" id="share-link">' + UI.esc(url) + '</div></div>';
-      html += '<div class="btn-row"><button class="btn btn-ghost" data-action="copy-code" data-code="' + UI.esc(trip.remoteCode) + '">' +
+      html += '<div class="btn-row"><button class="btn btn-ghost" data-action="copy-code" data-code="' + UI.esc(invite) + '">' +
         UI.icon('copy', 18) + '코드 복사</button>' +
         '<button class="btn btn-primary" data-action="share-link">' + UI.icon('share', 18) + '링크 보내기</button></div>';
       html += '<div class="note mt12">링크를 받은 일행은 앱을 설치하지 않아도 브라우저에서 바로 열 수 있어요. ' +
@@ -1865,6 +2031,11 @@
         (trip.members || []).map(function (m) { return UI.esc(m.name); }).join(' · ') + '</span></div>';
       html += '<div class="btn-row mt12"><button class="btn btn-ghost" data-action="manage-members">' +
         UI.icon('users', 18) + '일행 관리</button></div>';
+      if (owner) {
+        html += '<div class="btn-row mt12"><button class="btn btn-ghost" data-action="reissue-code">' +
+          UI.icon('swap', 18) + '초대 코드 재발급</button></div>' +
+          '<div class="hintline">재발급하면 <b>지금 코드·링크로는 더 이상 들어올 수 없어요</b>. 이미 함께 쓰는 일행은 그대로 이어 쓰고, 새 사람에게는 새 링크를 보내면 돼요.</div>';
+      }
       html += '<div class="sheet-foot"><button class="btn btn-ghost" data-action="close-modal">닫기</button></div>';
     } else {
       var cfgOk = !!Store.firebaseConfig();
@@ -1888,6 +2059,24 @@
   };
 
   A['copy-code'] = function (el) { UI.copy(el.getAttribute('data-code')); };
+  /** v28: 방장이 초대 코드를 새로 발급 — 이전 링크는 닫힌다 */
+  A['reissue-code'] = function () {
+    var trip = TL.App.currentTrip();
+    if (!trip || !trip.remoteCode) return;
+    if (!Store.signedIn()) { UI.requireLogin('로그인하면 초대 코드를 재발급할 수 있어요'); return; }
+    if (!confirm('초대 코드를 새로 발급할까요?\n지금 코드·링크로는 더 이상 들어올 수 없어요. (이미 함께 쓰는 일행은 그대로예요)')) return;
+    UI.toast('새 초대 코드를 만드는 중…', 3000);
+    Store.reissueInviteCode(trip.id).then(function (res) {
+      var t = Store.trip(trip.id) || trip;
+      D.share(t);
+      UI.toast('새 초대 코드 ' + res.code + ' 발급 · 이전 링크는 닫혔어요', 3800);
+    }, function (e) {
+      if (e && e.code === 'need-login') { UI.requireLogin('로그인하면 초대 코드를 재발급할 수 있어요'); return; }
+      if (e && e.code === 'notowner') { UI.toast('방장만 초대 코드를 재발급할 수 있어요', 3000); return; }
+      if (e && e.code === 'nolink') { UI.toast('아직 공유 방이 없어요 · 실시간 공유를 먼저 켜 주세요', 3200); return; }
+      UI.toast('재발급하지 못했어요 · ' + ((e && e.message) || '네트워크를 확인해 주세요'), 3400);
+    });
+  };
   A['share-link'] = function () {
     var trip = TL.App.currentTrip();
     if (!trip) return;
@@ -1942,11 +2131,20 @@
     UI.toast('여행을 불러오는 중…');
     Store.joinByCode(code, nick).then(function (trip) {
       var t = Store.trip(trip.id);
-      var m = D.joinSelf(t, nick);      // 내 계정(uid·이메일)을 일행에 연결 → 목록에 보이고 본인 판별이 된다
-      TL.App.openTrip(trip.id, 'schedule');
-      UI.toast(m ? '참여했어요 · ' + m.name : '참여했어요');
+      // v28: 내가 누구인지 정한다 — 확실하면 바로 연결, 아니면 기존 일행 중 선택 시트
+      var m = D.afterJoin(t, { name: nick });
+      if (m) {
+        TL.App.openTrip(trip.id, 'schedule');
+        UI.toast('참여했어요 · ' + m.name);
+      } else {
+        TL.App.goHome();   // 선택 시트가 떠 있다
+      }
     }).catch(function (e) {
       var needLogin = e && e.code === 'need-login';
+      if (e && (e.code === 'notfound' || e.code === 'revoked')) {
+        UI.toast(e.code === 'revoked' ? Store.REVOKED_MESSAGE : Store.GONE_MESSAGE, 4000);
+        return;
+      }
       UI.toast(needLogin ? '로그인한 뒤 다시 참여해 주세요' : '참여 실패: ' + (e.message || e));
     });
   };

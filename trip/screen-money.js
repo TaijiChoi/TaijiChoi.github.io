@@ -26,6 +26,7 @@
         '<div><div class="k">나만 보기</div><b>' + Core.won(t.personal) + '</b></div>' +
         '<div><div class="k">1인 평균</div><b>' + Core.won(avg) + '</b></div>' +
       '</div>' +
+      '<div class="hintline" style="margin-top:8px">1인 평균은 <b>정산 대상</b> 금액을 일행 수로 나눈 값이에요 · 나만 보기는 빠져요. 정산 복사 문구도 같은 기준이에요.</div>' +
     '</div>';
 
     /* ---- v22: 실시간 환율 (새로고침 + 마지막 갱신 시각) */

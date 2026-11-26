@@ -310,6 +310,9 @@
     } else if (id === 'f_amount' || id === 'f_rate' || id === 'f_charged') {
       if (id === 'f_rate' && TL.Dialogs.markRateManual) TL.Dialogs.markRateManual();
       TL.Dialogs.updateExpensePreview();
+    } else if (id === 'member-new' || id === 'mem-new') {
+      /* v28: 지난 일행 한 글자 자동완성 (본인 기기에만 저장된 이름·이메일) */
+      if (TL.Dialogs.showContactSuggest) TL.Dialogs.showContactSuggest(id, ev.target.value);
     }
   }
   document.addEventListener('input', onFieldChange);
@@ -530,23 +533,25 @@
     UI.toast('초대받은 여행을 불러오는 중…');
     Store.joinByCode(code, Store.settings().nickname).then(function (t) {
       pendingCode = '';
-      App.openTrip(t.id, 'schedule');
       cleanUrl();
-      TL.Dialogs.maybeWhoAmI(Store.trip(t.id));
-      // v23: 예전 방(ownerUid 없음)을 다시 열었을 때 — 서버의 방까지 지우는 길을 알려 준다
       var joined = Store.trip(t.id);
+      // v28: 일행 중 내가 누구인지 먼저 정한다 — 이름이 겹친다고 방이 목록에서 사라지지 않게
+      var me = TL.Dialogs.afterJoin(joined, { name: Store.settings().nickname });
+      if (me) App.openTrip(t.id, 'schedule'); else App.goHome();   // 정하지 못했으면 선택 시트가 떠 있다
+      // v23: 예전 방(ownerUid 없음)을 다시 열었을 때 — 서버의 방까지 지우는 길을 알려 준다
       if (joined && joined.remoteCode && !joined.ownerUid && Core.canDestroyRoom(joined, Store.currentUser())) {
         setTimeout(function () {
           UI.toast('이 방은 아직 서버에 남아 있어요 · 여행 정보 › 삭제에서 완전히 삭제할 수 있어요', 4600);
         }, 500);
       }
     }).catch(function (e) {
-      if (e && e.code === 'notfound') {
-        // 폭파된 방·없는 코드: 참여시키지 않고 목록으로 튕겨낸다
+      if (e && (e.code === 'notfound' || e.code === 'revoked')) {
+        // 폭파된 방·재발급으로 닫힌 예전 코드: 참여시키지 않고 목록으로 튕겨낸다
         pendingCode = '';
         cleanUrl();
         UI.close();
-        goneHome('');
+        App.goHome();
+        UI.toast(e.code === 'revoked' ? Store.REVOKED_MESSAGE : Store.GONE_MESSAGE, 4200);
         return;
       }
       var needLogin = e && e.code === 'need-login';
@@ -568,6 +573,8 @@
         TL.Account.init();
         TL.Account.onChange(function () { render(); });
       }
+      // v28: 지난 여행의 일행 이름·이메일을 이 기기에 모아 둔다 (자동완성용 · 기기 밖으로 나가지 않음)
+      if (Store.syncContacts) { try { Store.syncContacts(); } catch (e) {} }
       if (TL.Auth && TL.Auth.onChange) {
         TL.Auth.onChange(function (user) {
           if (!user || !user.uid) return;

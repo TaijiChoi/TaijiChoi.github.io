@@ -383,6 +383,23 @@
     });
     return timed.map(function (x) { return x.s; }).concat(untimed.map(function (x) { return x.s; }));
   };
+  /**
+   * 새 일정이 그 날 목록에서 들어갈 자리 (v28)
+   *  · 시간이 있으면: 같은 시간 뒤, 더 늦은 시간 앞
+   *  · 시간이 없으면: 맨 뒤 (시간 없는 일정은 뒤로 모인다)
+   * list는 그 날의 기존 일정(정렬된 순서)
+   */
+  Core.insertIndexByTime = function (list, item) {
+    var rows = list || [];
+    var t = Core.normTime(item && item.time);
+    if (!/^\d{2}:\d{2}$/.test(t)) return rows.length;
+    for (var i = 0; i < rows.length; i++) {
+      var st = Core.normTime(rows[i] && rows[i].time);
+      if (!/^\d{2}:\d{2}$/.test(st)) return i;   // 시간 없는 일정은 뒤로 → 그 앞에 넣는다
+      if (st > t) return i;
+    }
+    return rows.length;
+  };
   /** dayKey 순서대로 정렬한 일정 (전체) */
   Core.orderSchedules = function (trip, list) {
     var dayIdx = {};
@@ -972,11 +989,15 @@
     var set = Core.settle(trip, data);
     var t = Core.totals(trip, data);
     var members = (trip && trip.members) || [];
-    /* v27: 카톡에 그대로 붙여넣을 수 있게 여행명 · 총 정산액 · 1인 평균 · 송금 내역 */
-    var avg = members.length ? Math.round(t.total / members.length) : 0;
+    /* v27: 카톡에 그대로 붙여넣을 수 있게 여행명 · 총 정산액 · 1인 평균 · 송금 내역
+       v28: 1인 평균을 가계부 화면과 같은 '정산 대상' 기준으로 맞춘다
+            (화면의 1인 평균 = 정산 대상 / 인원, '나만 보기'는 빼고 센다) */
+    var shared = Math.max(0, t.total - t.personal);
+    var avg = members.length ? Math.round(shared / members.length) : 0;
     var lines = [];
     lines.push('[' + ((trip && trip.name) || '여행') + '] 정산 내역');
-    lines.push('총지출 ' + Core.won(t.total) + ' · ' + members.length + '명 · 1인 평균 ' + Core.won(avg));
+    lines.push('총지출 ' + Core.won(shared) + ' · ' + members.length + '명 · 1인 평균 ' + Core.won(avg));
+    if (t.personal > 0) lines.push('(나만 보기 ' + Core.won(t.personal) + ' 제외)');
     if (set.transfers && set.transfers.length) {
       lines.push('');
       lines.push('보낼 돈');
@@ -987,7 +1008,6 @@
       lines.push('');
       lines.push('✅ ' + (set.hint || '보낼 돈이 없어요'));
     }
-    if (set.excluded > 0) lines.push('(나만 보기 ' + Core.won(set.excluded) + ' 제외)');
     return lines.join('\n');
   };
 
@@ -1351,6 +1371,92 @@
     if (me.uid && member.uid && String(member.uid) === me.uid) return true;
     if (me.email && member.email && String(member.email).trim().toLowerCase() === me.email) return true;
     return false;
+  };
+  /** 일행 한 명이 '다른 사람 계정'에 이미 연결돼 있는가 (내 계정은 빼고) */
+  Core.memberTakenByOther = function (member, user) {
+    if (!member) return false;
+    var me = whoOf(user);
+    if (me.uid && member.uid && String(member.uid) !== me.uid) return true;
+    if (me.email && member.email && String(member.email).trim().toLowerCase() !== me.email) return true;
+    return false;
+  };
+  /**
+   * 초대받아 들어온 사람이 이 방의 어느 일행인지 정하는 계획 (v28)
+   *  · linked   — 내 계정(uid·이메일)이 이미 연결된 일행이 있다 → 그 사람
+   *  · link-name — 같은 이름의 일행이 아직 계정과 연결돼 있지 않다 → 그 사람 (기기 별명과 이름이 같아도 놓치지 않는다)
+   *  · add      — 일행이 하나도 없다 → 새로 등록
+   *  · choose   — 누구인지 확실하지 않다 → 화면에서 기존 일행 중 본인을 고르거나 새 일행으로 추가
+   *  · memberId — 바로 연결해도 되는 일행 id (linked·link-name일 때만 있다)
+   */
+  Core.joinPlan = function (trip, user, opts) {
+    opts = opts || {};
+    var me = whoOf(user);
+    var ms = (trip && trip.members) || [];
+    var name = String(opts.name == null ? '' : opts.name).trim();
+    var out = { action: 'choose', memberId: '', sameName: '', unclaimed: [], candidates: [], name: name, total: ms.length };
+    var linked = null;
+    ms.forEach(function (m) { if (!linked && Core.memberMatches(m, me)) linked = m; });
+    out.candidates = ms.map(function (m) {
+      return {
+        id: m.id, name: m.name, email: String(m.email || ''),
+        mine: Core.memberMatches(m, me),
+        taken: Core.memberTakenByOther(m, me)
+      };
+    });
+    if (linked) { out.action = 'linked'; out.memberId = linked.id; return out; }
+    out.unclaimed = ms.filter(function (m) { return !m.uid && !m.email; }).map(function (m) { return m.id; });
+    var same = '';
+    if (name) {
+      ms.forEach(function (m) {
+        if (same || String(m.name) !== name) return;
+        if (Core.memberTakenByOther(m, me)) return;   // 같은 이름이지만 다른 사람 계정이 붙은 일행은 건너뛴다
+        same = m.id;
+      });
+    }
+    out.sameName = same;
+    if (same) { out.action = 'link-name'; out.memberId = same; return out; }
+    if (!ms.length) { out.action = 'add'; return out; }
+    return out;
+  };
+  /** 일행을 화면에 보여 줄 때 쓰는 짧은 설명: 이메일 · 계정 연결 상태 */
+  Core.memberSubLabel = function (member, user) {
+    if (!member) return '';
+    var bits = [];
+    if (member.email) bits.push(String(member.email));
+    if (Core.memberTakenByOther(member, user)) bits.push('다른 계정 연결');
+    else if (member.uid || member.email) bits.push('계정 연결');
+    else bits.push('계정 미연결');
+    return bits.join(' · ');
+  };
+
+  /* ------------------------------------------------ v28: 지난 일행 자동완성
+     이름 + 이메일을 본인 기기에만 저장해 두고, 한 글자만 쳐도 후보를 보여 준다.
+     (다른 기기·공용 DB로는 나가지 않는다 — store.js가 localStorage에만 쓴다) */
+  Core.contactMatch = function (contacts, query, limit) {
+    var q = String(query == null ? '' : query).trim().toLowerCase();
+    if (!q) return [];
+    var out = [];
+    (contacts || []).forEach(function (c) {
+      if (!c || !c.name) return;
+      var n = String(c.name).toLowerCase();
+      var e = String(c.email || '').toLowerCase();
+      var rank = n.indexOf(q) === 0 ? 0 : (e.indexOf(q) === 0 ? 1 : (n.indexOf(q) > 0 ? 2 : -1));
+      if (rank < 0) return;
+      out.push({
+        name: String(c.name), email: String(c.email || ''),
+        lastAt: String(c.lastAt || ''), count: Number(c.count) || 1, rank: rank
+      });
+    });
+    out.sort(function (a, b) {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      if (a.lastAt !== b.lastAt) return a.lastAt < b.lastAt ? 1 : -1;
+      if (a.count !== b.count) return b.count - a.count;
+      return a.name.length - b.name.length;
+    });
+    var n = Number(limit);
+    return out.slice(0, n > 0 ? n : 5).map(function (c) {
+      return { name: c.name, email: c.email, lastAt: c.lastAt, count: c.count };
+    });
   };
   /** 이 여행이 이 계정의 것인가: 방장이거나 일행에 등록(uid·이메일)된 경우만 true
       · 예시 여행은 누구나 볼 수 있는 체험용이라 true
