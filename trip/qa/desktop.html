@@ -423,7 +423,7 @@
     await sleep(240);
     ok(q('#mem-new').value === '아내' && q('#mem-email').value === 'wife@example.com', 'v28 데스크톱: 후보가 이름·이메일 채움', q('#mem-new').value + ' / ' + q('#mem-email').value);
     noOverflowDesktop('자동완성');
-    await clickSel('[data-action="close-modal"]');
+    await click(q('[data-action="close-modal"]'));
     await sleep(180);
 
     // '나'로 지정하면 계정도 연결
@@ -433,7 +433,7 @@
     await click(q('#mem-rows .mrow[data-id="' + dMe + '"] [data-action="mem-set-me"]'));
     await sleep(300);
     ok(w.eval('(TL.Store.trip("' + tid + '").members||[]).filter(function (m) { return m.id === "' + dMe + '" })[0].uid') === 'd1', 'v28 데스크톱: 나 지정 시 계정 연결', w.eval('(TL.Store.trip("' + tid + '").members||[]).filter(function (m) { return m.id === "' + dMe + '" })[0].uid'));
-    await clickSel('[data-action="close-modal"]');
+    await click(q('[data-action="close-modal"]'));
     await sleep(180);
 
     // 1인 평균: 화면과 정산 문구가 같은 기준 (나만 보기 제외)
@@ -481,7 +481,7 @@
     await sleep(300);
     ok(!!q('[data-action="reissue-code"]'), 'v28 데스크톱: 초대 코드 재발급 버튼');
     ok(text('.sheet-body').indexOf('지금 코드·링크로는 더 이상 들어올 수 없어요') >= 0, 'v28 데스크톱: 재발급 안내');
-    await clickSel('[data-action="close-modal"]');
+    await click(q('[data-action="close-modal"]'));
     await sleep(160);
 
     w.TL.Store.setFirebase(null);
