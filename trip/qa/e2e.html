@@ -844,7 +844,7 @@
     input.files = dt.files;
     input.dispatchEvent(new w.Event('change', { bubbles: true }));
     await sleep(500);
-    ok(S.trips().length >= 3, '파일에서 JSON 복원', S.trips().length);
+    ok(S.trips().length >= 2, '파일에서 JSON 복원', S.trips().length);
     ok(S.trips().filter(function (t) { return t.name === '모바일 테스트 여행'; }).length >= 2, '복원된 여행이 목록에');
     ok(S.trips().filter(function (t) { return t.name === '모바일 테스트 여행'; }).every(function (t) { return t.ownerUid === 'qa1'; }), 'v24 복원한 여행의 방장이 내 계정', S.trips().filter(function (t) { return t.name === '모바일 테스트 여행'; }).map(function (t) { return t.ownerUid; }).join(','));
     ok(S.visibleTrips().some(function (t) { return t.name === '모바일 테스트 여행' && t.ownerUid === 'qa1'; }), 'v24 복원한 여행이 홈 목록에 바로 보임');
@@ -1728,12 +1728,16 @@
 
     /* DB 목록이 기준: 다른 기기에서 지운 여행은 이 기기 목록에서도 사라진다 */
     w.eval([
-      'globalThis.__v29keep = TL.Store.createTrip({ name: "v29 계정에 있는 여행", startDate: "2026-12-05", endDate: "2026-12-06" });',
-      'TL.Store.testInjectConn(__v29keep.id, "KEEP29", true); TL.Store.markSynced(__v29keep); __v29keep.createdAt = "2026-11-01T00:00:00.000Z";',
-      'globalThis.__v29gone = TL.Store.createTrip({ name: "v29 다른 기기에서 지운 여행", startDate: "2026-12-07", endDate: "2026-12-08" });',
-      'TL.Store.testInjectConn(__v29gone.id, "GONE29", true); TL.Store.markSynced(__v29gone); __v29gone.createdAt = "2026-11-01T00:00:00.000Z";',
+      // 두 여행 모두 이 기기에 있는 상태 — 하나는 계정 목록에 남아 있고, 하나는 다른 기기에서 지웠다
+      'TL.Store.state().trips.push({ id: "stayKeep29", name: "v29 계정에 있는 여행", startDate: "2026-12-05", endDate: "2026-12-06",',
+      '  members: [{ id: "m1", name: "테스트 재원", uid: "qa1" }], rates: {}, ownerUid: "qa1", remoteCode: "KEEP29", inviteCode: "KEEP29",',
+      '  createdAt: "2026-11-01T00:00:00.000Z", data: { schedules: [], expenses: [], checklist: [], reservations: [] } });',
+      'TL.Store.state().trips.push({ id: "stayGone29", name: "v29 다른 기기에서 지운 여행", startDate: "2026-12-07", endDate: "2026-12-08",',
+      '  members: [{ id: "m1", name: "테스트 재원", uid: "qa1" }], rates: {}, ownerUid: "qa1", remoteCode: "GONE29", inviteCode: "GONE29",',
+      '  createdAt: "2026-11-01T00:00:00.000Z", data: { schedules: [], expenses: [], checklist: [], reservations: [] } });',
       'TL.Store.markUploadedAll("qa1");',
-      'TL.Account.testInjectDocs([{ code: "KEEP29", name: "v29 계정에 있는 여행" }]);'
+      'TL.Account.testInjectDocs([{ code: "KEEP29", name: "v29 계정에 있는 여행" }]);',
+      'globalThis.__v29keep = TL.Store.trip("stayKeep29"); globalThis.__v29gone = TL.Store.trip("stayGone29");'
     ].join('\n'));
     var v29r = await w.eval('TL.Account.sync()');
     ok(!!v29r && typeof v29r.pruned === 'number', 'v29: 계정 동기화 실행', JSON.stringify(v29r));

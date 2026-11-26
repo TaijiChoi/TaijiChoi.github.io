@@ -508,8 +508,10 @@
 
     /* 다른 기기에서 지운 여행은 이 기기 목록에서도 사라진다 */
     w.eval([
-      'globalThis.__d29gone = TL.Store.createTrip({ name: "v29 다른 기기 삭제", startDate: "2026-12-07", endDate: "2026-12-08" });',
-      'TL.Store.testInjectConn(__d29gone.id, "GONEDK", true); TL.Store.markSynced(__d29gone); __d29gone.createdAt = "2026-11-01T00:00:00.000Z";',
+      'TL.Store.state().trips.push({ id: "stayGoneDk", name: "v29 다른 기기 삭제", startDate: "2026-12-07", endDate: "2026-12-08",',
+      '  members: [{ id: "m1", name: "데스크톱 사용자", uid: "d1" }], rates: {}, ownerUid: "d1", remoteCode: "GONEDK", inviteCode: "GONEDK",',
+      '  createdAt: "2026-11-01T00:00:00.000Z", data: { schedules: [], expenses: [], checklist: [], reservations: [] } });',
+      'globalThis.__d29gone = TL.Store.trip("stayGoneDk");',
       'TL.Store.markUploadedAll("d1");',
       'TL.Account.testInjectDocs([{ code: "DKDK01", name: "남는 여행" }]);'
     ].join('\n'));
