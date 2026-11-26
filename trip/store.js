@@ -50,10 +50,20 @@
       defaultRates: Object.assign({}, Core.DEFAULT_RATES),
       ratesCache: { fetchedAt: 0, rates: {} },
       meByTrip: {},
-      seenWelcome: false
+      uploadedAll: {}          // v29: 계정별 '기기에만 있던 여행 올리기' 완료 표시 (uid → true)
     };
   }
   var state = load();
+  /** 예시 여행(샘플)인가 — v29부터 앱은 예시 여행을 만들지도, 기기에 남기지도 않는다 */
+  function isSampleTrip(t) {
+    return !!(t && (t.sample === true || String(t.id || '').indexOf('trip_sample') === 0));
+  }
+  /** 목록에서 예시 여행을 걸러 낸다 (로드·로그인 때 조용히 정리) */
+  function purgeSamples(list) {
+    return (Array.isArray(list) ? list : []).filter(function (t) { return !isSampleTrip(t); });
+  }
+  Store.isSampleTrip = isSampleTrip;
+  Store.purgeSamples = purgeSamples;
 
   /** 지금 쓸 Firebase 설정: 내 설정(state.firebase)이 있으면 그것, 없으면 기본 내장값 */
   function cfgOf(cfg) { return cfg || state.firebase || DEFAULT_FIREBASE; }
@@ -89,6 +99,9 @@
       if (!s.meByTrip || typeof s.meByTrip !== 'object' || Array.isArray(s.meByTrip)) s.meByTrip = {};
       if (!s.ratesCache || typeof s.ratesCache !== 'object') s.ratesCache = { fetchedAt: 0, rates: {} };
       if (!s.ratesCache.rates || typeof s.ratesCache.rates !== 'object') s.ratesCache.rates = {};
+      /* v29: '오사카' 예시 여행 시드를 없앴다 — 기기에 남아 있던 예시 여행도 함께 지운다
+         (여러 기기에서 자꾸 보이던 샘플을 로그인·로드 때 다시 올리지 않도록 여기서 걸러 낸다) */
+      s.trips = purgeSamples(s.trips);
       s.trips.forEach(function (t) {
         if (!t.data) t.data = {};
         COLLS.forEach(function (c) { if (!Array.isArray(t.data[c])) t.data[c] = []; });
@@ -324,6 +337,9 @@
       }
     } catch (e) {}
     trip.createdHere = true;
+    /* v29: 로그인 상태에서 만든 여행은 곧 DB에 올라간다. 올라가기 전까지 syncPending으로 표시해
+       오프라인에서 만든 여행이 계정 목록 동기화에 지워지지 않게 한다 */
+    trip.syncPending = !!currentUser();
     state.trips.push(trip);
     state.currentTripId = trip.id;
     notify();
@@ -333,16 +349,24 @@
 
   /** 로그인 상태에서 만든 여행은 계정에 남겨 다른 기기에서도 열 수 있게 실시간 방을 만든다 (실패하면 로컬로 남는다) */
   function maybeAutoShare(trip) {
-    if (!trip || !Store.firebaseConfig()) return;
+    if (!trip) return;
     var signed = false;
     try { signed = !!(TL.Auth && TL.Auth.signedIn()); } catch (e) {}
-    if (!signed) return;
+    if (!signed) { trip.syncPending = false; return; }
+    if (!Store.firebaseConfig()) return;
     setTimeout(function () {
       var t = Store.trip(trip.id);
-      if (!t || t.remoteCode) return;
-      Store.connect(t.id, { create: true }).then(function () {
-        if (TL.Account) TL.Account.onTrip(Store.trip(t.id));
-      }).catch(function () { /* 오프라인·규칙 오류 → 로컬 유지 */ });
+      if (!t) return;
+      if (t.remoteCode && !t.syncPending) return;
+      var step = t.remoteCode ? Promise.resolve(t) : Store.connect(t.id, { create: true });
+      step.then(function () {
+        var now = Store.trip(t.id);
+        if (!now) return null;
+        if (!now.remoteCode) { now.syncPending = true; save(); return null; }
+        return TL.Account ? TL.Account.onTrip(now) : null;
+      }).catch(function () { /* 오프라인·규칙 오류 → 로컬 유지, 온라인이 되면 다시 올린다 */
+        if (TL.Store.trip(t.id)) { TL.Store.trip(t.id).syncPending = true; save(); }
+      });
     }, 0);
   }
 
@@ -364,12 +388,28 @@
     return trip;
   };
 
-  Store.removeTrip = function (id) {
+  /** 이 기기 목록에서만 지운다 (계정 문서는 건드리지 않는다 — 이미 서버에서 지워진 여행 정리에 쓴다) */
+  Store.removeTripLocal = function (id) {
+    var before = state.trips.length;
     state.trips = state.trips.filter(function (t) { return t.id !== id; });
+    if (state.trips.length === before) return false;
     if (state.currentTripId === id) state.currentTripId = null;
     if (state.meByTrip) delete state.meByTrip[id];
     if (conn && conn.tripId === id) closeConn();
     notify();
+    return true;
+  };
+  /** 여행을 목록에서 지운다 (v29: 초대코드가 있으면 계정 목록 users/{uid}/trips/{code}에서도 지운다)
+      · 계정 문서까지 지워야 다른 기기가 DB를 조회할 때 이 여행이 다시 살아나지 않는다
+      · 방 자체(폭파)는 destroyTrip이 따로 처리한다 */
+  Store.removeTrip = function (id) {
+    var trip = Store.trip(id);
+    var code = normalizeCode(trip && (trip.remoteCode || trip.inviteCode));
+    var ok = Store.removeTripLocal(id);
+    if (ok && code) {
+      try { if (TL.Account && TL.Account.forget) TL.Account.forget(code); } catch (e) {}
+    }
+    return ok;
   };
   /** 이 기기 목록과 계정 목록에서 여행을 뺀다 (서버 방은 건드리지 않는다) */
   function forgetLocal(code, tripId) {
@@ -406,7 +446,12 @@
   }
   /** 연결이 살아 있을 때만 메타 문서에 쓴다. 첫 스냅샷을 받기 전에는 상대 여행 정보를 덮어쓰지 않는다. */
   function pushMeta(trip, keys) {
-    if (!trip || !trip.remoteCode || !conn || conn.code !== trip.remoteCode || !conn.metaReady) return;
+    if (!trip || !trip.remoteCode) return;
+    if (!conn || conn.code !== trip.remoteCode || !conn.metaReady) {
+      trip.metaDirty = true;   // v29: 연결되면 올린다
+      save();
+      return;
+    }
     remoteWrite(trip, metaDoc(trip), metaPayload(trip, keys), { mustExist: true });
   }
 
@@ -437,7 +482,12 @@
   }
   function writeContacts(list) {
     try {
-      var sorted = (list || []).slice().sort(function (a, b) { return String(b.lastAt || '').localeCompare(String(a.lastAt || '')); });
+      var sorted = (list || []).slice().sort(function (a, b) {
+        var d = String(b.lastAt || '').localeCompare(String(a.lastAt || ''));
+        if (d) return d;
+        // 같은 시각이면 이름순 — 정렬이 흔들려도 후보 순서가 매번 같게
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
       root.localStorage && root.localStorage.setItem(CONTACTS_KEY, JSON.stringify(sorted.slice(0, Store.CONTACTS_MAX)));
     } catch (e) { /* 저장 공간 부족 등 */ }
   }
@@ -1399,6 +1449,7 @@
             linkedOnce = true;
             if (TL.Account) TL.Account.onTrip(trip);   // 로그인 상태면 계정 여행 목록에도 남긴다
           }
+          flushWrites(trip);   // v29: 방 정보를 받은 뒤 오프라인 대기열(메타 포함)을 올린다
           notify();
           done();
         }, function (e) {
@@ -1428,6 +1479,8 @@
           });
         }
 
+        // v29: 오프라인에서 고쳐 둔 항목을 구독 전에 먼저 올린다 (첫 스냅샷이 지운 것처럼 보이지 않게)
+        flushWrites(trip);
         COLLS.forEach(function (coll) {
           var colRef = fsMod.collection(db, 'trips', code, coll);
           conn.unsubs.push(fsMod.onSnapshot(colRef, function (snap) {
@@ -1466,6 +1519,8 @@
     return Store.connect(trip.id, { code: trip.remoteCode });
   };
   Store.disconnect = function () { closeConn(); };
+  /** 지금 실시간 연결 중인 여행 id (없으면 '') — 계정 목록 정리 때 방금 연 여행을 건드리지 않게 */
+  Store.connectedTripId = function () { return conn ? String(conn.tripId || '') : ''; };
   Store.status = function () {
     return {
       connected: !!(conn && db),
@@ -1506,7 +1561,15 @@
   }
   function remoteWrite(trip, path, data, opts) {
     var ref = remoteRef(trip, path);
-    if (!ref) return false;
+    if (!ref) {
+      /* v29: Firestore를 아직 불러오지 못한 오프라인 상태 — 기기에 대기열로 남겨 두고 연결되면 올린다
+         (앱을 오프라인으로 새로 열어 고친 내용이 사라지지 않게) */
+      var q = queuePathOf(path);
+      if (!trip) return false;
+      if (q === 'meta') { trip.metaDirty = true; save(); return true; }
+      if (q && q.coll && q.id) { queueWrite(trip, q.coll, q.id, data); save(); return true; }
+      return false;
+    }
     /* mustExist: 방 문서가 살아 있을 때만 고친다(updateDoc)
        — 보던 기기의 늦은 메타 쓰기가 폭파된 방 문서를 되살리는 일을 막는다 */
     if (opts && opts.mustExist && fs && typeof fs.updateDoc === 'function') {
@@ -1520,10 +1583,13 @@
     fs.setDoc(ref, data, { merge: true }).catch(reportError);
     return true;
   }
-  /** 문서 삭제. 지금 Firestore가 준비되지 않았으면 false(→ 호출한 쪽이 pendingDeletes에 쌓는다) */
-  function remoteDelete(trip, path) {
+  /** 문서 삭제. 지금 Firestore가 준비되지 않았으면 false(→ 호출한 쪽이 pendingDeletes에 쌓는다) */  function remoteDelete(trip, path) {
     var ref = remoteRef(trip, path);
-    if (!ref) return false;
+    if (!ref) {
+      var q = queuePathOf(path);
+      if (q && q.coll && q.id) { queueDelete(trip, q.coll, q.id); save(); }
+      return false;
+    }
     fs.deleteDoc(ref).catch(reportError);
     return true;
   }
@@ -1532,8 +1598,56 @@
      기기의 캐시·예전 스냅샷·오프라인 쓰기가 지운 항목을 다시 보여 주거나 되살리는 것을 막는다.
      · 지운 id는 trip.deleted 에 남겨 같은 id가 다시 스냅샷에 실려 와도 목록에 넣지 않는다
      · Firestore가 아직 준비되지 않아 지우지 못한 요청은 pendingDeletes 에 쌓아 두고 연결되면 지운다 */
-  function tombKey(coll, id) { return coll + '/' + id; }
-  function tombMap(trip) {
+  /* ------------------------------------- v29: 오프라인 쓰기 대기열
+     Firestore를 아직 불러오지 못한 상태(오프라인으로 새로 연 화면)에서 고친 내용은
+     trip.pendingWrites 에 남겨 두고, 연결되면 setDoc으로 올린다. 기기에는 즉시 저장된다(localStorage). */
+  function queuePathOf(path) {
+    var p = (Array.isArray(path) ? path : []).filter(function (s) { return s !== '' && s != null; });
+    if (p[0] === 'trips') p.shift();
+    if (p.length > 2 && COLLS.indexOf(p[1]) >= 0) return { coll: p[1], id: String(p[2]) };
+    if (p.length > 1 && COLLS.indexOf(p[0]) >= 0) return { coll: p[0], id: String(p[1]) };
+    return 'meta';
+  }
+  function queueWrite(trip, coll, id, data) {
+    if (!trip || !coll || !id) return false;
+    if (!trip.pendingWrites || typeof trip.pendingWrites !== 'object' || Array.isArray(trip.pendingWrites)) trip.pendingWrites = {};
+    trip.pendingWrites[coll + '/' + id] = { coll: coll, id: String(id), data: data || {}, at: new Date().toISOString() };
+    return true;
+  }
+  /** 대기열에 쌓인 쓰기를 Firestore로 올린다. 첫 스냅샷을 받은 뒤에 부르면 메타까지 함께 올린다. */
+  function flushWrites(trip) {
+    if (!trip || !trip.remoteCode || !fs || !db) return 0;
+    var n = 0;
+    var q = trip.pendingWrites;
+    if (q && typeof q === 'object') {
+      Object.keys(q).forEach(function (k) {
+        var it = q[k];
+        if (!it || !it.coll || !it.id) { delete q[k]; return; }
+        var ref = null;
+        try { ref = fs.doc(db, 'trips', trip.remoteCode, it.coll, String(it.id)); } catch (e) { ref = null; }
+        if (!ref) return;
+        n++;
+        fs.setDoc(ref, it.data || {}).then(function () { delete q[k]; }, function (e) { reportError(e); });
+      });
+    }
+    if (trip.metaDirty) {
+      // 메타는 방 문서의 첫 스냅샷을 받은 뒤에만 올린다 (기기 캐시로 방 정보를 덮어쓰지 않게)
+      if (conn && conn.code === trip.remoteCode && conn.metaReady) {
+        trip.metaDirty = false;
+        remoteWrite(trip, [trip.remoteCode], metaPayload(trip), { mustExist: true });
+        n++;
+      }
+    }
+    return n;
+  }
+  Store.flushWrites = function (tripId) { return flushWrites(Store.trip(tripId)); };
+  Store.pendingWriteCount = function (tripId) {
+    var t = typeof tripId === 'string' ? Store.trip(tripId) : tripId;
+    if (!t) return 0;
+    return Object.keys(t.pendingWrites || {}).length + (t.metaDirty ? 1 : 0);
+  };
+
+  function tombKey(coll, id) { return coll + '/' + id; }  function tombMap(trip) {
     if (!trip) return null;
     if (!trip.deleted || typeof trip.deleted !== 'object' || Array.isArray(trip.deleted)) trip.deleted = {};
     return trip.deleted;
@@ -1558,6 +1672,7 @@
     if (!trip) return;
     if (!Array.isArray(trip.pendingDeletes)) trip.pendingDeletes = [];
     var key = tombKey(coll, id);
+    if (trip.pendingWrites && trip.pendingWrites[key]) delete trip.pendingWrites[key];   // 올리기 전에 지운 것은 올리지 않는다
     if (!trip.pendingDeletes.some(function (d) { return d && d.key === key; })) {
       trip.pendingDeletes.push({ key: key, coll: coll, id: id });
     }
@@ -2046,18 +2161,36 @@
     if (key !== fbKey(null)) resetFb(); else closeConn();
     notify();
   };
-  Store.loadSample = function () {
-    var t = TL.sampleTrip();
-    t.id = 'trip_sample_' + Date.now().toString(36);
-    state.trips.push(t);
-    state.currentTripId = t.id;
-    notify();
-    return t;
+
+  /* ---------------------------------------- v29: DB 기준 동기화 표시
+     DB(Firestore)가 여행 목록의 기준이다. 기기에만 있는 여행은 올라갈 때까지 syncPending으로 표시해
+     계정 목록 동기화가 아직 올리지 못한 오프라인 생성분을 지우지 않게 한다. */
+  /** 올리기 대기 표시를 켜고 끈다 (계정 등록에 성공하면 끈다) */
+  Store.setSyncPending = function (trip, on) {
+    var t = typeof trip === 'string' ? Store.trip(trip) : trip;
+    if (!t) return false;
+    var next = !!on;
+    if (!!t.syncPending === next) return false;
+    t.syncPending = next;
+    save();
+    return true;
   };
-  Store.firstRun = function () {
-    return !state.seenWelcome && state.trips.length === 0;
+  Store.markSynced = function (trip) { return Store.setSyncPending(trip, false); };
+  Store.markSyncPending = function (trip) { return Store.setSyncPending(trip, true); };
+  /** 아직 계정·방에 올리지 못한 여행 (오프라인에서 만든 것) */
+  Store.pendingUploads = function () {
+    return (state.trips || []).filter(function (t) { return t && !t.sample && (!t.remoteCode || t.syncPending); });
   };
-  Store.markWelcome = function () { state.seenWelcome = true; save(); };
+  /** 계정별 '기기에만 있던 여행을 한 번 올렸다' 표시 */
+  Store.isUploadedAll = function (uid) { return !!(uid && state.uploadedAll && state.uploadedAll[uid]); };
+  Store.markUploadedAll = function (uid) {
+    if (!uid) return false;
+    if (!state.uploadedAll || typeof state.uploadedAll !== 'object') state.uploadedAll = {};
+    if (state.uploadedAll[uid]) return false;
+    state.uploadedAll[uid] = true;
+    save();
+    return true;
+  };
 
   /* --------------------------------------------------------- bootstrap */
   /** URL의 ?trip=CODE, ?cfg=... 를 읽어 초기 참여를 준비한다. */

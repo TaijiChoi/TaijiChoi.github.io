@@ -307,7 +307,6 @@
     var user = signed ? TL.Auth.currentUser() : null;
     var trips = Store.visibleTrips(user);          // 방장이거나 일행으로 등록된 여행만
     var mine = trips.filter(function (t) { return !t.sample; });
-    var samples = trips.filter(function (t) { return t.sample; });
     var html = '';
     html += '<header class="topbar plain">' +
       '<div class="brand"><span class="brand-mark">' + UI.icon('plane', 16) + '</span>트립로그</div>' +
@@ -325,7 +324,7 @@
         '<div class="ln-head">' + UI.icon('lock', 17) + '<b>로그인하면 내 여행이 보여요</b></div>' +
         '<p>내가 만든 여행과 일행으로 등록된 여행만 목록에 나와요. 여행 만들기·참여·일정·지출 등록도 로그인 후에 할 수 있어요.</p>' +
         '<button class="btn btn-primary sm" data-action="open-account">' + UI.icon('google', 16) + 'Google로 로그인</button>' +
-        '<div class="hintline" style="margin-top:6px">로그인하지 않으면 아래 <b>예시 여행</b>으로 화면만 둘러볼 수 있어요.</div>' +
+        '<div class="hintline" style="margin-top:6px">내 여행은 <b>계정(Firebase)에 저장</b>돼 다른 기기에서도 그대로 열려요.</div>' +
       '</div>';
     }
 
@@ -336,7 +335,6 @@
         '<p>' + (signed ? '새 여행을 만들거나, 일행에게 받은 초대 코드로 참여해 보세요.' : '로그인하면 내 여행 목록이 여기에 나와요.') + '</p>' +
         '<div class="btn-row"><button class="btn btn-primary" data-action="new-trip">' + UI.icon('plus') + '새 여행 만들기</button></div>' +
         '<div class="btn-row"><button class="btn btn-ghost" data-action="join-trip">' + UI.icon('link') + '초대 코드로 참여하기</button></div>' +
-        (samples.length ? '' : '<div class="btn-row"><button class="btn btn-ghost" data-action="load-sample">' + UI.icon('sparkle') + '예시 여행 보기</button></div>') +
         '</div>';
     }
 
@@ -346,13 +344,6 @@
         '<button class="btn btn-primary" data-action="new-trip">' + UI.icon('plus') + '새 여행 만들기</button>' +
         '<button class="btn btn-ghost" data-action="join-trip">' + UI.icon('link') + '초대 코드로 참여하기</button>' +
         '</div>';
-    }
-
-    if (samples.length) {
-      html += '<div class="section-title" style="margin-top:22px"><h2>체험용 예시 여행</h2>' +
-        '<span class="pill gray">로그인 없이 둘러보기</span></div>' +
-        '<div class="trip-list">' + samples.map(function (t) { return UI.tripCardHtml(t, user); }).join('') + '</div>' +
-        '<div class="hintline">예시 여행은 내 계정·목록에 저장되지 않아요. 기록을 남기려면 로그인해 주세요.</div>';
     }
 
     html += '<div class="tiny muted center" style="margin:26px 0 8px;line-height:1.6">' +

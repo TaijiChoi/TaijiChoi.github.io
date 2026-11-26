@@ -2228,7 +2228,6 @@
       '<label class="btn btn-ghost sm" for="json-file">' + UI.icon('upload', 17) + 'JSON 복원</label></div>' +
       '<input type="file" id="json-file" accept="application/json,.json" class="sr-file">' +
       '<div class="hintline">백업 파일은 이 기기 여행 전부를 담아요. 다른 폰에서 복원하면 그대로 이어서 쓸 수 있어요.</div>' +
-      '<button class="btn btn-ghost sm mt12" data-action="load-sample" style="width:100%">' + UI.icon('sparkle', 17) + '예시 여행 불러오기</button>' +
       '<button class="btn btn-danger sm mt8" data-action="reset-all" style="width:100%">모든 데이터 지우기</button>';
 
     html += '<div class="sheet-foot"><button class="btn btn-primary" data-action="close-modal">닫기</button></div>';

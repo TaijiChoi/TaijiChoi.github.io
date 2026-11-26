@@ -254,12 +254,6 @@
       case 'open-share': if (trip) TL.Dialogs.share(trip); return;
       case 'join-trip': if (!UI.requireLogin('로그인하면 초대 코드로 참여할 수 있어요')) return; TL.Dialogs.join(); return;
       case 'open-settings': TL.Dialogs.settings(trip); return;
-      case 'load-sample':
-        Store.loadSample();
-        UI.close();
-        App.goHome();
-        UI.toast('예시 여행을 불러왔어요');
-        return;
       case 'add-schedule':
         if (!UI.requireLogin('로그인하면 일정을 추가할 수 있어요')) return;
         TL.Dialogs.schedule(trip, null, el.getAttribute('data-day')); return;
@@ -424,6 +418,18 @@
     Store.setOnline(true);
     UI.toast('다시 연결됐어요 · 저장한 내용을 동기화해요');
     if (TL.RouteMap) TL.RouteMap.online();
+    /* v29: 연결이 돌아오면 기기에만 있던 여행·오프라인 수정분을 DB로 올리고 목록을 다시 맞춘다 */
+    try {
+      var cur = App.currentTrip();
+      if (cur && cur.remoteCode) {
+        Store.openRemote(cur.id).then(function () { Store.flushWrites(cur.id); }, function () {});
+      }
+    } catch (e) {}
+    try {
+      if (TL.Account && TL.Account.signedIn && TL.Account.signedIn()) {
+        TL.Account.sync().catch(function () {});
+      }
+    } catch (e) {}
     render();
   });
   window.addEventListener('offline', function () {
@@ -580,6 +586,8 @@
           if (!user || !user.uid) return;
           // 로그인 직후: 소유자 없는 내 여행을 이 계정 것으로 정리하고, 대기 중인 초대 링크를 이어서 처리
           try { Store.claimTrips(user.uid); } catch (e) {}
+          // v29: 방장 정리가 끝난 뒤 목록을 DB와 한 번 더 맞춘다 (올리기·정리)
+          try { if (TL.Account && TL.Account.syncSoon) TL.Account.syncSoon(700); } catch (e) {}
           if (pendingCode) { var c = pendingCode; pendingCode = ''; tryJoin(c); }
         });
       }
@@ -604,9 +612,6 @@
       } else {
         tryJoin(code);
       }
-    } else if (Store.firstRun()) {
-      Store.loadSample();
-      Store.markWelcome();
     }
 
     if (initial.screen === 'trip') {
