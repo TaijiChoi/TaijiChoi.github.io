@@ -180,7 +180,8 @@
         var m = dataOf(snap2);
         if (m.deleted === true) return { ok: false, reason: 'notfound' };
         var inv = normalizeCode(m.inviteCode);
-        if (inv && inv !== c) return { ok: false, reason: 'revoked' };   // 재발급 전의 예전 코드
+        // 재발급 전의 예전 코드 — 단, 그 방의 방장·일행(내 계정)이면 그대로 열어 준다
+        if (inv && inv !== c && !Core.amInRoom(m, currentUser())) return { ok: false, reason: 'revoked' };
         return { ok: true, room: c, invite: c };
       }, function () { return { ok: true, room: c, invite: c, unchecked: true }; });
     }, function () { return { ok: true, room: c, invite: c, unchecked: true }; });
@@ -1342,7 +1343,7 @@
              들어오지 않는다. 이미 들어온 기기는 remoteCode로 붙을 뿐 opts.invite가 없어 영향이 없다. */
           if (!opts.create && opts.invite) {
             var invNow = normalizeCode(m.inviteCode);
-            if (invNow && invNow !== normalizeCode(opts.invite)) {
+            if (invNow && invNow !== normalizeCode(opts.invite) && !Core.amInRoom(m, currentUser())) {
               closeConn();
               var rev = new Error(Store.REVOKED_MESSAGE);
               rev.code = 'revoked';

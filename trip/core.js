@@ -1364,6 +1364,19 @@
     };
   }
   Core.whoOf = whoOf;
+  /**
+   * 이 방 문서(meta)의 방장·일행에 내 계정이 들어 있는가 (v28)
+   *  · 초대 코드를 새로 발급해도 **이미 함께 쓰는 사람**은 예전 코드로도 계속 들어올 수 있게 하는 기준
+   */
+  Core.amInRoom = function (meta, user) {
+    if (!meta) return false;
+    var me = whoOf(user);
+    if (!me.uid && !me.email) return false;
+    if (me.uid && String(meta.ownerUid || '') === me.uid) return true;
+    var ms = meta.members || [];
+    for (var i = 0; i < ms.length; i++) if (Core.memberMatches(ms[i], me)) return true;
+    return false;
+  };
   /** 일행 한 명이 이 계정인가 (uid 우선, 없으면 이메일로 연결) */
   Core.memberMatches = function (member, user) {
     if (!member || !user) return false;
