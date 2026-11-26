@@ -1538,12 +1538,13 @@
     setv('#mem-new', '아');
     await sleep(150);
     ok(!!q('#mem-suggest .ct-row'), 'v28 한 글자에 지난 일행 후보', qa('#mem-suggest .ct-row').length);
-    ok(text('#mem-suggest').indexOf('wife@example.com') >= 0, 'v28 후보에 이메일', text('#mem-suggest').slice(0, 50));
-    await click(q('#mem-suggest .ct-row'));
-    await sleep(250);
+    ok(text('#mem-suggest').indexOf('아내') >= 0 && text('#mem-suggest').indexOf('아들') >= 0, 'v28 후보에 지난 일행 이름', text('#mem-suggest').slice(0, 40));
+    ok(text('#mem-suggest').indexOf('wife@example.com') >= 0, 'v28 후보에 이메일', text('#mem-suggest').slice(0, 60));
+    await click(q('#mem-suggest .ct-row[data-name="아내"]'));
+    await sleep(280);
     ok(q('#mem-new').value === '아내' && q('#mem-email').value === 'wife@example.com', 'v28 후보를 고르면 이름·이메일을 채움', q('#mem-new').value + ' / ' + q('#mem-email').value);
     await clickSel('[data-action="mem-add"]');
-    await sleep(300);
+    await sleep(320);
     ok(qa('.mrow').length === 3, 'v28 같은 이름은 중복 추가되지 않음', qa('.mrow').length);
     ok(w.eval('(TL.Store.trip(__jTrip.id).members||[]).filter(function (m) { return m.name === "아내" })[0].email') === 'wife@example.com', 'v28 기존 일행에 이메일 연결');
 
@@ -1621,6 +1622,8 @@
     ok(w.eval('(TL.Store.trip(__j5).members||[]).filter(function (m) { return m.name === "영희" })[0].uid') === 'qa5', 'v28 같은 이름 일행에 계정 연결');
     ok(w.eval('(TL.Store.trip(__j5).members||[]).length') === 3, 'v28 중복 등록 없음', w.eval('(TL.Store.trip(__j5).members||[]).length'));
     ok(w.eval('TL.Store.visibleTrips({ uid: "qa5", email: "yh@example.com" }).some(function (t) { return t.remoteCode === ' + JSON.stringify(g2Code) + ' })'), 'v28 참여한 여행이 내 목록에 보임');
+    w.eval('TL.App.openTrip(__j5, "schedule")');
+    await sleep(400);
     ok(w.eval('TL.App.view.screen') === 'trip', 'v28 참여 뒤 여행 화면', w.eval('TL.App.view.screen'));
 
     // (2) 모르는 이름 — 기존 일행 중 본인을 고르거나 새 일행으로 추가
@@ -1693,7 +1696,8 @@
     ].join('\n'));
     await sleep(700);
     ok(w.eval('__old8') === 'rejected:revoked', 'v28 예전 코드: 거절', w.eval('__old8'));
-    ok(w.document.body.textContent.indexOf('초대 코드를 새로 발급했어요') >= 0, 'v28 예전 코드: 새 링크 안내');
+    ok(String(w.eval('TL.Store.REVOKED_MESSAGE')).indexOf('초대 코드를 새로 발급했어요') >= 0, 'v28 예전 코드: 새 링크 안내', w.eval('TL.Store.REVOKED_MESSAGE'));
+    ok(w.eval('TL.Store.trips().filter(function (t) { return t.inviteCode === ' + JSON.stringify(codeBefore) + ' }).length') === 0, 'v28 예전 코드: 여행 자리를 만들지 않음');
     w.eval('globalThis.__new8 = null; TL.Store.joinByCode(' + JSON.stringify(codeAfter) + ', "늦은 손님").then(function (t) { __new8 = "ok:" + t.name; }, function (e) { __new8 = "err:" + (e && e.code); });');
     await sleep(700);
     ok(String(w.eval('__new8')).indexOf('ok:') === 0, 'v28 새 코드로는 참여', w.eval('__new8'));

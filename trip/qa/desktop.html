@@ -418,8 +418,9 @@
     setv('#mem-new', '아');
     await sleep(180);
     ok(!!q('#mem-suggest .ct-row'), 'v28 데스크톱: 한 글자 후보', qa('#mem-suggest .ct-row').length);
-    await click(q('#mem-suggest .ct-row'));
-    await sleep(220);
+    ok(text('#mem-suggest').indexOf('아내') >= 0 && text('#mem-suggest').indexOf('wife@example.com') >= 0, 'v28 데스크톱: 후보 목록', text('#mem-suggest').slice(0, 40));
+    await click(q('#mem-suggest .ct-row[data-name="아내"]'));
+    await sleep(240);
     ok(q('#mem-new').value === '아내' && q('#mem-email').value === 'wife@example.com', 'v28 데스크톱: 후보가 이름·이메일 채움', q('#mem-new').value + ' / ' + q('#mem-email').value);
     noOverflowDesktop('자동완성');
     await clickSel('[data-action="close-modal"]');
@@ -428,10 +429,10 @@
     // '나'로 지정하면 계정도 연결
     w.eval('TL.Store.setMeMember("' + tid + '", null); TL.Dialogs.members(TL.Store.trip("' + tid + '"));');
     await sleep(260);
-    var dMe = w.eval('(TL.Store.trip("' + tid + '").members||[])[0].id');
+    var dMe = w.eval('((TL.Store.trip("' + tid + '").members||[]).filter(function (m) { return !m.uid && !m.email; })[0] || (TL.Store.trip("' + tid + '").members||[])[0]).id');
     await click(q('#mem-rows .mrow[data-id="' + dMe + '"] [data-action="mem-set-me"]'));
     await sleep(300);
-    ok(w.eval('(TL.Store.trip("' + tid + '").members||[])[0].uid') === 'd1', 'v28 데스크톱: 나 지정 시 계정 연결', w.eval('(TL.Store.trip("' + tid + '").members||[])[0].uid'));
+    ok(w.eval('(TL.Store.trip("' + tid + '").members||[]).filter(function (m) { return m.id === "' + dMe + '" })[0].uid') === 'd1', 'v28 데스크톱: 나 지정 시 계정 연결', w.eval('(TL.Store.trip("' + tid + '").members||[]).filter(function (m) { return m.id === "' + dMe + '" })[0].uid'));
     await clickSel('[data-action="close-modal"]');
     await sleep(180);
 
