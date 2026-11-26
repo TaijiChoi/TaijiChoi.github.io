@@ -138,6 +138,12 @@
       try { cb({ gone: String(code || ''), tripId: String(tripId || '') }); } catch (e) { console.error(e); }
     });
   }
+  /** v32: 규칙이 이 방의 접근을 막았다(일행이 아니거나 로그인 계정이 다름) — 기기 데이터는 그대로 두고 화면만 돌린다 */
+  function roomDenied(code, tripId) {
+    listeners.slice().forEach(function (cb) {
+      try { cb({ denied: String(code || ''), tripId: String(tripId || '') }); } catch (e) { console.error(e); }
+    });
+  }
 
   /* -------------------------------------------------------------- trips */
   Store.trips = function () {
@@ -162,7 +168,8 @@
 
   /* ---------------------------------------------- v28: 초대 코드 / 재발급
      방 문서 코드(trip.remoteCode)는 데이터 경로라 바뀌지 않고, 초대 코드(trip.inviteCode)만 새로 발급한다.
-     · 새 코드는 triplog_meta/join-<코드> 별칭 문서가 방 문서를 가리킨다
+     · 새 코드는 별칭 문서(triplog_meta/joins/<코드>)가 방 문서를 가리킨다 (v32)
+       — 예전 별칭(triplog_meta/join-<코드>)도 함께 남겨 v31 이하 기기가 읽을 수 있게 한다
      · 방 문서의 inviteCode와 다른 코드(예전 코드)로는 새로 들어올 수 없다 — 이미 들어온 일행의 연결은 그대로
      · 이 기기에 이미 있는 방은 remoteCode로 계속 붙으므로, 초대 코드가 바뀌어도 끊기지 않는다 */
   function normalizeCode(c) { return String(c == null ? '' : c).trim().toUpperCase(); }
@@ -172,7 +179,16 @@
   Store.inviteCodeOf = function (trip) {
     return normalizeCode((trip && (trip.inviteCode || trip.remoteCode)) || '');
   };
-  function joinAliasDocId(code) { return 'join-' + normalizeCode(code); }
+  /* v32: 초대 코드 별칭 — 저장소 규칙이 문서 경로로 '지금 살아 있는 초대 코드'를 확인할 수 있게
+     코드를 그대로 문서 id로 쓰는 하위 컬렉션(triplog_meta/joins/<코드>)에 둔다 */
+  function aliasRef(fsMod, code, legacy) {
+    var c = normalizeCode(code);
+    return legacy ? fsMod.doc(db, 'triplog_meta', 'join-' + c) : fsMod.doc(db, 'triplog_meta', 'joins', c);
+  }
+  function joinAliasDocId(code) { return 'join-' + normalizeCode(code); }   // v31 이하 기기 호환 별칭
+  function claimRef(fsMod, invite, uid) {
+    return fsMod.doc(db, 'triplog_meta', 'joins', normalizeCode(invite), 'claims', String(uid));
+  }
   /** 초대 코드 → 방 문서 코드. 별칭 문서가 있으면 그 방, 없으면 같은 이름의 방 문서를 본다
       · 읽지 못했을 때(오프라인·권한)는 코드를 방 문서 코드로 보고 넘긴다 —
         연결 뒤 방 문서 스냅샷의 inviteCode로 다시 한 번 확인한다 */
@@ -183,10 +199,19 @@
       return !!(snap && (typeof snap.exists === 'function' ? snap.exists() : (snap.data && snap.data())));
     };
     var dataOf = function (snap) { return (snap && snap.data && snap.data()) || {}; };
-    var aliasRef = fsMod.doc(db, 'triplog_meta', joinAliasDocId(c));
-    return withTimeout(fsMod.getDoc(aliasRef), 8000, 'join-timeout').then(function (snap) {
-      var d = existsOf(snap) ? dataOf(snap) : null;
-      if (d && d.room && d.deleted !== true) return { ok: true, room: normalizeCode(d.room), invite: c };
+    /** 별칭 한 곳을 읽어 본다 — 없으면 null, 읽지 못하면 {error} */
+    function readAlias(legacy) {
+      return withTimeout(fsMod.getDoc(aliasRef(fsMod, c, legacy)), 8000, 'join-timeout').then(function (snap) {
+        var d = existsOf(snap) ? dataOf(snap) : null;
+        if (d && d.room && d.deleted !== true) return { ok: true, room: normalizeCode(d.room), invite: c };
+        return null;
+      }, function (e) { return { error: e }; });
+    }
+    return readAlias(false).then(function (hit) {
+      if (hit && hit.ok) return hit;
+      return readAlias(true);
+    }).then(function (hit) {
+      if (hit && hit.ok) return hit;
       var roomRef = fsMod.doc(db, 'trips', c);
       return withTimeout(fsMod.getDoc(roomRef), 8000, 'room-timeout').then(function (snap2) {
         if (!existsOf(snap2)) return { ok: false, reason: 'notfound' };
@@ -196,7 +221,16 @@
         // 재발급 전의 예전 코드 — 단, 그 방의 방장·일행(내 계정)이면 그대로 열어 준다
         if (inv && inv !== c && !Core.amInRoom(m, currentUser())) return { ok: false, reason: 'revoked' };
         return { ok: true, room: c, invite: c };
-      }, function () { return { ok: true, room: c, invite: c, unchecked: true }; });
+      }, function (e) {
+        // v32: 규칙이 막았다 — 재발급으로 닫힌 코드이거나 들어올 수 없는 코드다 (네트워크 오류와 구분)
+        if (errCodeOf(e) === 'denied') {
+          // 폭파된 방이면 '삭제된 링크'로 안내한다 (폭파 기록이 남아 있다)
+          return readGrave(fsMod, c).then(function (g) {
+            return { ok: false, reason: (g && g.found) ? 'notfound' : 'revoked' };
+          });
+        }
+        return { ok: true, room: c, invite: c, unchecked: true };
+      });
     }, function () { return { ok: true, room: c, invite: c, unchecked: true }; });
   }
   /** 방장이 초대 코드를 새로 발급한다 — 이전 코드·링크로는 더 이상 들어올 수 없다 */
@@ -228,12 +262,17 @@
         ? fsMod.updateDoc(roomRef, payload)                       // 방이 살아 있을 때만 (폭발한 방을 되살리지 않는다)
         : fsMod.setDoc(roomRef, payload, { merge: true });
       return write.then(function () {
-        return fsMod.setDoc(fsMod.doc(db, 'triplog_meta', joinAliasDocId(next)),
-          { room: room, code: next, at: stamp, by: (acct && acct.uid) || '' }, { merge: true });
+        var aliasData = { room: room, code: next, at: stamp, by: (acct && acct.uid) || '' };
+        return fsMod.setDoc(aliasRef(fsMod, next), aliasData, { merge: true }).then(function () {
+          // v31 이하 기기 호환 별칭도 함께 고친다
+          return fsMod.setDoc(aliasRef(fsMod, next, true), aliasData, { merge: true }).catch(function () {});
+        });
       }).then(function () {
         // 예전 코드의 별칭 문서를 지우면 그 링크는 바로 닫힌다 (방 문서 코드 자체는 데이터 경로라 남긴다)
         if (!oldInvite || oldInvite === room || oldInvite === next) return null;
-        return fsMod.deleteDoc(fsMod.doc(db, 'triplog_meta', joinAliasDocId(oldInvite))).catch(function () {});
+        return fsMod.deleteDoc(aliasRef(fsMod, oldInvite)).catch(function () {}).then(function () {
+          return fsMod.deleteDoc(aliasRef(fsMod, oldInvite, true)).catch(function () {});
+        });
       }).then(function () {
         trip.inviteCode = next;
         notify();
@@ -422,15 +461,24 @@
     notify();
   }
 
-  var META_FIELDS = ['name', 'destination', 'startDate', 'endDate', 'baseCurrency', 'members', 'rates', 'ratesUpdatedAt', 'ownerUid', 'ownerEmail', 'inviteCode'];
+  var META_FIELDS = ['name', 'destination', 'startDate', 'endDate', 'baseCurrency', 'members', 'rates', 'ratesUpdatedAt', 'ownerUid', 'ownerEmail', 'inviteCode', 'memberUids', 'pendingEmails'];
   /** 메타 문서에 실어 보낼 값. keys를 주면 그 항목만 담는다(merge 쓰기라 나머지 필드는 그대로 남는다). */  function metaPayload(trip, keys) {
-    var use = Array.isArray(keys) && keys.length ? keys : META_FIELDS;
+    var use = Array.isArray(keys) && keys.length ? keys.slice() : META_FIELDS.slice();
+    /* v32: 일행 목록이 바뀌면 접근 명단도 함께 보낸다 — 방장이 이메일만 적어 둔 일행(pendingEmails)이
+       규칙에서 바로 열리게 (따로 적지 않으면 이메일이 방 문서에 올라가지 않는다) */
+    if (use.indexOf('members') >= 0) {
+      if (use.indexOf('memberUids') < 0) use.push('memberUids');
+      if (use.indexOf('pendingEmails') < 0) use.push('pendingEmails');
+    }
     var out = {};
     use.forEach(function (k) {
       if (META_FIELDS.indexOf(k) < 0) return;
       if (k === 'members') out.members = trip.members || [];
       else if (k === 'rates') out.rates = trip.rates || {};
       else if (k === 'baseCurrency') out.baseCurrency = trip.baseCurrency || 'KRW';
+      /* v32: 저장소 규칙이 보는 접근 명단 — 방장 + 계정이 연결된 일행, 이메일만 적힌 일행 */
+      else if (k === 'memberUids') out.memberUids = Core.memberUidsOf(trip);
+      else if (k === 'pendingEmails') out.pendingEmails = Core.pendingEmailsOf(trip);
       // v24: 방장 계정은 값이 있을 때만 싣는다 — 빈 값으로 다른 기기의 방장 기록을 지우지 않는다
       else if (k === 'ownerUid' || k === 'ownerEmail') { if (trip[k]) out[k] = k === 'ownerEmail' ? String(trip[k]).trim().toLowerCase() : String(trip[k]); }
       // v28: 지금 유효한 초대 코드 (방 문서 코드와 다를 수 있다 — 재발급 때 바뀐다)
@@ -794,7 +842,7 @@
     if ((trip.members || []).length <= 1) return { ok: false, error: '최소 한 명은 남겨야 해요' };
     var removed = trip.members.filter(function (m) { return m.id === memberId; })[0];
     if (!removed) return { ok: false, error: '일행을 찾을 수 없어요' };
-    trip.members = trip.members.filter(function (m) { return m.id !== memberId; });
+    trip.members = trip.members.filter(function (m) { return m.id !== memberId });
     var nextPay = trip.members[0] ? trip.members[0].id : '';
     var moved = 0;
     var touched = [];
@@ -817,6 +865,12 @@
       touchedChecks.forEach(function (c) { remoteWrite(trip, [trip.remoteCode, 'checklist', c.id], stripId(c)); });
     }
     if (removed.name && state.nickname === removed.name) state.nickname = '';
+    /* v32: 뺀 일행의 계정은 저장소 접근 명단(memberUids)에서도 지운다 — 남겨 두면 계속 읽고 쓸 수 있다 */
+    if (removed.uid) {
+      var uidGone = String(removed.uid);
+      trip.memberUids = (Array.isArray(trip.memberUids) ? trip.memberUids : []).filter(function (u) { return String(u) !== uidGone; });
+      dropClaimsOf(trip, uidGone);
+    }
     pushMeta(trip, ['members']);
     notify();
     return { ok: true, name: removed.name, moved: moved };
@@ -1311,7 +1365,9 @@
   /** 다른 모듈(계정 동기화)이 같은 Firestore 인스턴스를 쓸 수 있게 열어 준다 */
   Store.fsdb = function () { return { fs: fs, db: db }; };
 
-  /** Firebase 설정 유효성 확인용: 연결 테스트 (지금 쓰는 인스턴스는 그대로 두고 임시로 붙여 본다) */
+  /** Firebase 설정 유효성 확인용: 연결 테스트 (지금 쓰는 인스턴스는 그대로 두고 임시로 붙여 본다)
+      v32: 로그인하지 않은 상태에서는 규칙이 triplog_meta 읽기를 막는다. 그 거절(permission-denied)은
+      서버·프로젝트가 정상이고 규칙이 작동한다는 뜻이므로 연결 성공으로 본다. */
   Store.testFirebase = function (cfg) {
     var use = cfgOf(cfg);
     if (!use) return Promise.reject(new Error('Firebase 설정이 없습니다. 설정에서 먼저 입력해 주세요.'));
@@ -1322,7 +1378,11 @@
       return withTimeout(fsMod.getDoc(ref), 10000, 'Firestore 응답이 없어요. 데이터베이스 생성 여부와 네트워크를 확인해 주세요.')
         .then(function () {
           app = prev.app; fs = prev.fs; db = prev.db; loadedKey = prev.key;
-          return true;
+          return { ok: true, denied: false };
+        }, function (e) {
+          app = prev.app; fs = prev.fs; db = prev.db; loadedKey = prev.key;
+          if (errCodeOf(e) === 'denied') return { ok: true, denied: true };   // 규칙이 막았을 뿐, 연결은 정상
+          throw e;
         });
     }).catch(function (e) {
       app = prev.app; fs = prev.fs; db = prev.db; loadedKey = prev.key;
@@ -1330,12 +1390,122 @@
     });
   };
 
+  /* ------------------------------------------------ v32: 저장소 규칙과 맞춘 접근
+     규칙은 방 문서(trips/{code})의 ownerUid·memberUids·pendingEmails와
+     초대 코드 표시(triplog_meta/join-<초대코드>/claims/<uid>)만 보고 허용한다.
+     · 일행이면 그대로 읽고 쓴다
+     · 초대받아 처음 들어온 계정은 자기 uid 하나를 memberUids에 더해 일행이 된다 (규칙이 그 쓰기만 허용)
+     · 재발급된 초대 코드로 들어오면 그 코드로 들어왔다는 표시(claim)를 먼저 남긴다 */
+  var DENIED_MESSAGE = '이 여행을 볼 권한이 없어요 · 초대받은 계정으로 로그인했는지 확인해 주세요.';
+  Store.DENIED_MESSAGE = DENIED_MESSAGE;
+
+  /** Firestore 오류 → 앱이 다루는 코드 (권한 없음은 'denied'로, 없는 방과 구분한다) */
+  function errCodeOf(e) {
+    var msg = String((e && (e.code || e.message)) || e);
+    return /permission-denied|insufficient permissions|PERMISSION_DENIED/i.test(msg) ? 'denied' : '';
+  }
+  Store.errCodeOf = errCodeOf;
+
+  function claimPath(invite, uid) { return ['triplog_meta', 'joins', normalizeCode(invite), 'claims', String(uid)]; }
+  /** 재발급된 초대 코드로 들어왔다는 표시를 남긴다 (규칙: 그 코드의 별칭 문서가 살아 있어야 만든다) */
+  function leaveClaim(fsMod, invite, uid) {
+    var code = normalizeCode(invite);
+    if (!code || !uid) return Promise.resolve(false);
+    return withTimeout(fsMod.setDoc(fsMod.doc.apply(null, [db].concat(claimPath(code, uid))),
+      { uid: String(uid), code: code, at: new Date().toISOString() }, { merge: true }), 10000, 'claim-timeout')
+      .then(function () { return true; }, function (e) { reportError(e); return false; });
+  }
+  /** 다 쓴 초대 표시를 지운다 (일행 명단에 올랐으니 필요 없다 · 방장은 일행을 뺄 때도 지운다) */
+  function dropClaim(fsMod, invite, uid) {
+    var code = normalizeCode(invite);
+    if (!fsMod || !code || !uid) return Promise.resolve(false);
+    return fsMod.deleteDoc(fsMod.doc.apply(null, [db].concat(claimPath(code, uid))))
+      .then(function () { return true; }, function () { return false; });
+  }
+  /** 지금 붙어 있는 Firestore로 초대 표시를 지운다 (없으면 조용히 넘어간다) */
+  function dropClaimsOf(trip, uid) {
+    if (!fs || !db || !trip || !uid) return;
+    [trip.inviteCode, trip.remoteCode].forEach(function (c) {
+      var code = normalizeCode(c);
+      if (!code) return;
+      try { dropClaim(fs, code, uid); } catch (e) {}
+    });
+  }
+  /** 이 계정이 초대받은 사람인가 — 방 문서만 보고 판단하는 클라이언트 쪽 기준 (규칙이 한 번 더 막는다) */
+  function invitedTo(trip, opts) {
+    var me = Core.whoOf(currentUser());
+    if (!trip || !me.uid) return false;
+    var invite = normalizeCode(opts && opts.invite);
+    var code = normalizeCode(trip.remoteCode);
+    if (invite && invite !== code) return true;                       // 재발급된 새 초대 코드로 들어왔다
+    if (code && normalizeCode(trip.inviteCode) === code) return true; // 초대 코드 = 방 문서 코드 (v28 이후 방)
+    var mails = (Array.isArray(trip.pendingEmails) ? trip.pendingEmails : []).map(function (m) { return String(m).toLowerCase(); });
+    if (me.email && mails.indexOf(me.email) >= 0) return true;        // 방장이 이메일을 적어 둔 일행
+    return false;
+  }
+  Store.isRuleMember = function (trip, user) {
+    return Core.isRuleMember(trip, user === undefined ? currentUser() : user);
+  };
+  /**
+   * 규칙이 하위 문서(일정·지출…)를 열어 줄 수 있게, 초대받아 처음 들어온 계정을 일행 명단에 올린다.
+   *  · 규칙은 "이미 있는 명단에 내 uid 하나만 더하는 쓰기"만 허용한다 (남의 방 명단을 고칠 수 없다)
+   *  · 이미 일행이면 아무것도 쓰지 않는다
+   *  · 실패하면 false — 하위 문서 구독을 시작하지 않는다 (권한 오류를 반복하지 않는다)
+   */
+  function ensureMembership(fsMod, trip, opts) {
+    var acct = currentUser();
+    if (!acct || !acct.uid || !trip || !trip.remoteCode) return Promise.resolve(false);
+    var uid = String(acct.uid);
+    var invite = normalizeCode(opts && opts.invite);
+    if (Core.isRuleMember(trip, acct)) {
+      if (invite) dropClaim(fsMod, invite, uid);   // 이미 일행 — 초대 표시는 남기지 않는다
+      return Promise.resolve(true);
+    }
+    if (!invitedTo(trip, opts)) return Promise.resolve(false);
+    var ref = fsMod.doc(db, 'trips', trip.remoteCode);
+    /** 명단을 (필요하면 서버에서 다시 읽고) 내 uid 하나만 더해 쓴다 */
+    function tryOnce(reread) {
+      var step = !reread ? Promise.resolve() : withTimeout(fsMod.getDoc(ref), 8000, 'membership-read').then(function (snap) {
+        var d = (snap && typeof snap.exists === 'function' && snap.exists()) ? (snap.data() || {}) : null;
+        if (d && Array.isArray(d.memberUids)) trip.memberUids = d.memberUids.map(String).filter(Boolean);
+      }, function () {});
+      return step.then(function () {
+        var before = (Array.isArray(trip.memberUids) ? trip.memberUids : []).map(String).filter(Boolean);
+        if (before.indexOf(uid) >= 0) return true;                     // 그 사이 다른 기기가 명단에 올려 두었다
+        var next = before.concat([uid]);
+        var write = (typeof fsMod.updateDoc === 'function')
+          ? fsMod.updateDoc(ref, { memberUids: next })
+          : fsMod.setDoc(ref, { memberUids: next }, { merge: true });
+        return withTimeout(write, 12000, 'membership-timeout').then(function () {
+          trip.memberUids = next;
+          save();
+          return true;
+        }, function (e) {
+          reportError(e);
+          return false;
+        });
+      });
+    }
+    /* 다른 기기가 동시에 명단을 바꿨으면 규칙이 거절한다 — 서버 값으로 한 번만 다시 시도한다 */
+    return tryOnce(false).then(function (ok) {
+      return ok ? true : tryOnce(true);
+    }).then(function (ok) {
+      if (ok && invite) dropClaim(fsMod, invite, uid);
+      return ok;
+    });
+  }
+
   /** 코드로 방을 열고 실시간 구독을 시작한다. code가 없으면 새로 만든다. */
   Store.connect = function (tripId, opts) {
     opts = opts || {};
     var trip = Store.trip(tripId);
     if (!trip) return Promise.reject(new Error('여행을 찾을 수 없습니다.'));
     if (!Store.firebaseConfig()) return Promise.reject(new Error('설정에서 Firebase 정보를 먼저 입력해 주세요.'));
+    /* v32: 저장소는 로그인한 계정만 연다 (규칙이 비로그인 접근을 모두 막는다) */
+    if (!Store.signedIn()) {
+      denyLogin();
+      return Promise.reject(Object.assign(new Error('로그인이 필요해요'), { code: 'need-login' }));
+    }
     return loadFb().then(function (fsMod) {
       var code = opts.code || trip.remoteCode || Core.inviteCode();
       trip.remoteCode = code;
@@ -1349,8 +1519,15 @@
       var metaRef = fsMod.doc(db, 'trips', code);
       var settled = false;
       var linkedOnce = false;
+      var itemsStarted = false;      // v32: 하위 문서 구독을 한 번만 시작한다
+      var membershipTried = false;   // v32: 첫 참여 명단 쓰기를 한 번만 시도한다
+      /* v32: 재발급된 새 초대 코드로 들어오는 경우 — 이 코드로 초대받았다는 표시를 먼저 남긴다
+         (규칙은 그 표시가 있어야 방 문서를 읽어 준다. 초대 코드 = 방 코드인 방은 필요 없다) */
+      var claimReady = (!opts.create && opts.invite && normalizeCode(opts.invite) !== normalizeCode(code))
+        ? leaveClaim(fsMod, opts.invite, (currentUser() || {}).uid)
+        : Promise.resolve(true);
       // v23: 이 코드가 폭파된 적이 있는지(무덤 기록)를 먼저 본다 — 늦은 쓰기가 방 문서를 되살려도 링크는 열리지 않는다
-      return readGrave(fsMod, code).then(function (grave) {
+      return claimReady.then(function () { return readGrave(fsMod, code); }).then(function (grave) {
         return new Promise(function (resolve, reject) {
         function done(err) {
           if (settled) return;
@@ -1414,6 +1591,10 @@
           if (m.ownerEmail) trip.ownerEmail = String(m.ownerEmail).toLowerCase();
           // v28: 다른 기기(방장)가 새로 발급한 초대 코드를 받아 둔다 — 공유할 때 새 링크가 나간다
           if (m.inviteCode) trip.inviteCode = normalizeCode(m.inviteCode);
+          /* v32: 저장소 규칙이 보는 접근 명단도 서버 값으로 맞춘다 (내가 쓴 값이 늦게 덮어쓰지 않게) */
+          if (Array.isArray(m.memberUids)) trip.memberUids = m.memberUids.map(String).filter(Boolean);
+          else if (!Array.isArray(trip.memberUids)) trip.memberUids = [];
+          if (Array.isArray(m.pendingEmails)) trip.pendingEmails = m.pendingEmails.map(String).filter(Boolean);
           // 다른 기기가 남긴 삭제 기록도 받아들인다 (늦은 쓰기로 되살아난 항목을 다시 숨긴다)
           if (Array.isArray(m.deletedKeys)) {
             m.deletedKeys.forEach(function (d) {
@@ -1452,8 +1633,36 @@
           flushWrites(trip);   // v29: 방 정보를 받은 뒤 오프라인 대기열(메타 포함)을 올린다
           notify();
           done();
+          /* v32: 하위 문서(일정·지출·준비물·예약)는 규칙상 '일행'만 읽을 수 있다.
+             초대받아 처음 들어온 계정은 이때 일행 명단에 자기 uid를 더한 뒤에 구독을 시작한다.
+             (화면에서 내가 누구인지 골라 일행 명단에 오르면 다음 스냅샷에서 구독이 시작된다) */
+          if (Core.isRuleMember(trip, currentUser())) { beginItems(); return; }
+          if (membershipTried) return;
+          membershipTried = true;
+          ensureMembership(fsMod, trip, opts).then(function (ok) {
+            if (ok) { beginItems(); return; }
+            // 일행이 아니거나 명단에 올리지 못했다 — 권한 오류를 반복하지 않고 화면에 이유를 남긴다
+            tlStateError('denied');
+            roomDenied(code, trip.id);
+          });
         }, function (e) {
           reportError(e);
+          /* v32: 권한 거절은 '없는 방'과 다르다. 폭파 기록이 있으면 폭파된 방으로 처리한다 */
+          var d = errCodeOf(e);
+          if (d === 'denied') {
+            closeConn();
+            if (grave && grave.found) {
+              var g = new Error(GONE_MESSAGE);
+              g.code = 'notfound';
+              done(g);
+              return;
+            }
+            tlStateError('denied');
+            var dn = new Error(DENIED_MESSAGE);
+            dn.code = 'denied';
+            done(dn);
+            return;
+          }
           done(new Error(e && (e.code || e.message) ? (e.code || e.message) : '연결할 수 없습니다'));
         }));
 
@@ -1481,29 +1690,41 @@
 
         // v29: 오프라인에서 고쳐 둔 항목을 구독 전에 먼저 올린다 (첫 스냅샷이 지운 것처럼 보이지 않게)
         flushWrites(trip);
-        COLLS.forEach(function (coll) {
-          var colRef = fsMod.collection(db, 'trips', code, coll);
-          conn.unsubs.push(fsMod.onSnapshot(colRef, function (snap) {
-            if (snap.metadata && snap.metadata.fromCache) Store.setFromCache(true);
-            if (conn && conn.code === code && !(snap.metadata && snap.metadata.fromCache) && conn.serverReady) {
-              conn.serverReady[coll] = true;
-            }
-            // 서버 기준으로 통째로 교체한다 — 로컬에 남은 예전 항목은 사라지고, 지운 기록이 있는 id는 빼낸다
-            trip.data[coll] = snap.docs.map(function (d) {
-              var v = d.data() || {};
-              v.id = d.id;
-              return v;
-            }).filter(function (v) { return !Store.isDeleted(trip, coll, v.id); });
-            // 첫 스냅샷 전에는 일괄 재업로드(순서 정리·기간 축소)를 하지 않는다
-            if (trip.hydrating) trip.hydrating = false;
-            notify();
-          }, function (e) { reportError(e); }));
-        });
-        // 연결되면 밀려 있던 삭제를 Firestore에 반영한다
-        flushDeletes(trip);
-
-        trip.remote = true;
-        notify();
+        function beginItems() {
+          if (itemsStarted || !conn || conn.code !== code) return;   // 그 사이 연결이 닫혔으면 시작하지 않는다
+          itemsStarted = true;
+          COLLS.forEach(function (coll) {
+            var colRef = fsMod.collection(db, 'trips', code, coll);
+            conn.unsubs.push(fsMod.onSnapshot(colRef, function (snap) {
+              if (snap.metadata && snap.metadata.fromCache) Store.setFromCache(true);
+              if (conn && conn.code === code && !(snap.metadata && snap.metadata.fromCache) && conn.serverReady) {
+                conn.serverReady[coll] = true;
+              }
+              // 서버 기준으로 통째로 교체한다 — 로컬에 남은 예전 항목은 사라지고, 지운 기록이 있는 id는 빼낸다
+              trip.data[coll] = snap.docs.map(function (d) {
+                var v = d.data() || {};
+                v.id = d.id;
+                return v;
+              }).filter(function (v) { return !Store.isDeleted(trip, coll, v.id); });
+              // 첫 스냅샷 전에는 일괄 재업로드(순서 정리·기간 축소)를 하지 않는다
+              if (trip.hydrating) trip.hydrating = false;
+              notify();
+            }, function (e) {
+              reportError(e);
+              // v32: 일행에서 빠졌거나 규칙에 막혔다 — 화면에 이유를 남기고 홈으로 돌려보낸다
+              if (errCodeOf(e) === 'denied' && conn && conn.code === code) {
+                tlStateError('denied');
+                roomDenied(code, trip.id);
+              }
+            }));
+          });
+          // 연결되면 밀려 있던 삭제를 Firestore에 반영한다
+          flushDeletes(trip);
+          trip.remote = true;
+          notify();
+        }
+        // 내가 이미 일행(방장 포함)이면 곧바로 구독한다 — 초대받아 처음 들어온 경우는 위 스냅샷 처리에서 명단에 올린 뒤
+        if (Core.isRuleMember(trip, currentUser())) beginItems();
 
         // 규칙/네트워크 오류로 응답이 없을 때를 대비한 안전 장치
         setTimeout(function () { done(); }, 12000);

@@ -2086,6 +2086,7 @@
   A['make-remote'] = function () {
     var trip = TL.App.currentTrip();
     if (!trip) return;
+    if (!UI.requireLogin('로그인하면 일행과 실시간으로 함께 쓸 수 있어요')) return;
     UI.close();
     UI.toast('공유 방을 만드는 중…');
     Store.connect(trip.id, { create: true }).then(function () {
@@ -2141,8 +2142,8 @@
       }
     }).catch(function (e) {
       var needLogin = e && e.code === 'need-login';
-      if (e && (e.code === 'notfound' || e.code === 'revoked')) {
-        UI.toast(e.code === 'revoked' ? Store.REVOKED_MESSAGE : Store.GONE_MESSAGE, 4000);
+      if (e && (e.code === 'notfound' || e.code === 'revoked' || e.code === 'denied')) {
+        UI.toast(e.code === 'notfound' ? Store.GONE_MESSAGE : Store.REVOKED_MESSAGE, 4000);
         return;
       }
       UI.toast(needLogin ? '로그인한 뒤 다시 참여해 주세요' : '참여 실패: ' + (e.message || e));
@@ -2210,6 +2211,8 @@
         '<li>복사한 설정을 위 칸에 붙여넣고 <b>저장하고 연결 테스트</b></li>' +
         '</ol></div>' +
         '<div class="code-box light" id="rules">' + UI.esc(D.RULES) + '</div>' +
+        '<div class="note mt8"><b>v32 규칙</b>을 게시하면 <b>로그인한 방장·일행만</b> 여행 정보·일정·지출을 읽고 쓸 수 있어요. ' +
+        '로그인하지 않은 요청과 여행 목록 조회(스캔)는 모두 막힙니다.</div>' +
         '<button class="btn btn-ghost sm mt8" data-action="copy-rules" style="width:100%">규칙 복사</button></details>';
     }
 
@@ -2237,20 +2240,149 @@
     if (fileEl) fileEl.addEventListener('change', D.importFile);
   };
 
-  D.RULES = "rules_version = '2';\n" +
-    "service cloud.firestore {\n" +
-    "  match /databases/{database}/documents {\n" +
-    "    // 일행 공유: 초대 코드를 아는 사람은 누구나 읽고 쓸 수 있다\n" +
-    "    match /trips/{code} { allow read, write: if true; }\n" +
-    "    match /trips/{code}/{document=**} { allow read, write: if true; }\n" +
-    "    match /triplog_meta/{doc} { allow read, write: if true; }\n" +
-    "    // 로그인 계정: 본인만 읽고 쓸 수 있다 (내 여행 목록·프로필)\n" +
-    "    match /users/{uid} {\n" +
-    "      allow read, write: if request.auth != null && request.auth.uid == uid;\n" +
-    "      match /trips/{code} { allow read, write: if request.auth != null && request.auth.uid == uid; }\n" +
-    "    }\n" +
-    "  }\n" +
-    "}";
+  /* v32: Firestore 보안 규칙 — 비로그인 접근을 모두 막고, 그 방의 방장·일행(과 초대받은 계정)만 연다.
+     설정 화면의 '규칙 복사'와 Firebase 콘솔에 붙여넣는 값이 같다. */
+  D.RULES = [
+    "rules_version = '2';",
+    "service cloud.firestore {",
+    "  match /databases/{database}/documents {",
+    "",
+    "    // ---------- 공통 ----------",
+    "    function authed() { return request.auth != null; }",
+    "    function uidNow() { return request.auth.uid; }",
+    "    function isMe(u) { return authed() && uidNow() == u; }",
+    "",
+    "    // ---------- 방 문서(trips/{code}) 접근 명단 ----------",
+    "    function roomOwner(d) {",
+    "      return authed() && ('ownerUid' in d) && (d.ownerUid is string) && d.ownerUid == uidNow();",
+    "    }",
+    "    function roomMember(d) {",
+    "      return authed() && (",
+    "        roomOwner(d) ||",
+    "        (('memberUids' in d) && (d.memberUids is list) && (uidNow() in d.memberUids))",
+    "      );",
+    "    }",
+    "    function pendingMail(d) {",
+    "      return authed()",
+    "        && ('pendingEmails' in d) && (d.pendingEmails is list)",
+    "        && (request.auth.token.email is string)",
+    "        && (request.auth.token.email.lower() in d.pendingEmails);",
+    "    }",
+    "    // 초대 링크의 코드가 곧 방 문서 코드인 방 (v28 이후 만든 방)",
+    "    function ownInviteCode(d, code) {",
+    "      return ('inviteCode' in d) && (d.inviteCode is string) && d.inviteCode == code;",
+    "    }",
+    "    // 초대 코드를 새로 발급한 방: 그 초대 코드로 들어왔다는 표시(claims)가 있는가",
+    "    function claimedInvite(d) {",
+    "      return ('inviteCode' in d) && (d.inviteCode is string)",
+    "        && exists(/databases/$(database)/documents/triplog_meta/joins/$(d.inviteCode)/claims/$(uidNow()));",
+    "    }",
+    "    // v28 이전에 만든 방: 초대 코드 = 방 문서 코드 (방장이 한 번 열면 새 형식으로 고쳐진다)",
+    "    function legacyRoom(d) {",
+    "      return authed() && !('inviteCode' in d) && !('memberUids' in d);",
+    "    }",
+    "    // 방장 기록이 없는 v24 이전 방은 방장 이메일로도 방장을 확인한다",
+    "    function legacyOwner(d) {",
+    "      return authed() && (",
+    "        roomOwner(d)",
+    "        || (('ownerEmail' in d) && (d.ownerEmail is string) && (request.auth.token.email is string)",
+    "          && d.ownerEmail == request.auth.token.email.lower())",
+    "      );",
+    "    }",
+    "    // 방 정보(이름·일행·환율)를 읽을 수 있는가 — 일행과 초대받은 로그인 사용자만",
+    "    function canReadRoom(d, code) {",
+    "      return authed() && (",
+    "        roomMember(d) || pendingMail(d) || ownInviteCode(d, code) || claimedInvite(d) || legacyRoom(d)",
+    "      );",
+    "    }",
+    "    // 일정·지출·준비물·예약은 그 방의 일행만",
+    "    function canUseItems(code) {",
+    "      return authed()",
+    "        && exists(/databases/$(database)/documents/trips/$(code))",
+    "        && roomMember(get(/databases/$(database)/documents/trips/$(code)).data);",
+    "    }",
+    "    // 첫 참여: 이미 있는 명단에 내 uid 하나만 더하는 쓰기",
+    "    function selfJoin(before, after) {",
+    "      return authed()",
+    "        && ('memberUids' in after) && (after.memberUids is list) && (uidNow() in after.memberUids)",
+    "        && after.diff(before).affectedKeys().hasOnly(['memberUids'])",
+    "        && (",
+    "          !('memberUids' in before) || !(before.memberUids is list)",
+    "          || (!(uidNow() in before.memberUids) && after.memberUids.size() == before.memberUids.size() + 1)",
+    "        );",
+    "    }",
+    "",
+    "    // ---------- 초대 코드 별칭·폭파 기록 ----------",
+    "    function roomOwnerIs(code) {",
+    "      return exists(/databases/$(database)/documents/trips/$(code))",
+    "        && ('ownerUid' in get(/databases/$(database)/documents/trips/$(code)).data)",
+    "        && get(/databases/$(database)/documents/trips/$(code)).data.ownerUid == uidNow();",
+    "    }",
+    "    // 별칭 문서(joins/<초대코드>)는 그 방의 방장만 만들고 지운다",
+    "    function aliasOwner(code) {",
+    "      return exists(/databases/$(database)/documents/triplog_meta/joins/$(code))",
+    "        && roomOwnerIs(get(/databases/$(database)/documents/triplog_meta/joins/$(code)).data.room);",
+    "    }",
+    "    function metaOwner(d) {",
+    "      return authed() && (",
+    "        (('room' in d) && (d.room is string) && roomOwnerIs(d.room)) ||",
+    "        (('code' in d) && (d.code is string) && roomOwnerIs(d.code))",
+    "      );",
+    "    }",
+    "",
+    "    // ---------- 방 ----------",
+    "    match /trips/{code} {",
+    "      allow list: if false;                        // 전체 여행 목록 조회 금지",
+    "      allow get: if canReadRoom(resource.data, code);",
+    "      allow create: if authed()",
+    "        && request.resource.data.ownerUid == uidNow()",
+    "        && (request.resource.data.memberUids is list)",
+    "        && (uidNow() in request.resource.data.memberUids);",
+    "      allow update: if canReadRoom(resource.data, code)",
+    "        && (roomMember(request.resource.data) || selfJoin(resource.data, request.resource.data));",
+    "      allow delete: if authed() && legacyOwner(resource.data);      // 방 폭파는 방장만",
+    "",
+    "      match /{document=**} {",
+    "        allow read, write: if canUseItems(code);",
+    "      }",
+    "    }",
+    "",
+    "    // ---------- 초대 코드 별칭·폭파 기록 ----------",
+    "    match /triplog_meta/{doc} {",
+    "      allow list: if false;",
+    "      allow get: if authed();                      // 코드 매핑 정보만 들어 있다",
+    "      allow create, update: if metaOwner(request.resource.data);",
+    "      allow delete: if metaOwner(resource.data);",
+    "    }",
+    "",
+    "    // 초대 코드 별칭 — 코드가 그대로 문서 id (claims 하위에 '이 코드로 들어왔다' 표시)",
+    "    match /triplog_meta/joins/{code} {",
+    "      allow list: if false;",
+    "      allow get: if authed();",
+    "      allow create, update: if metaOwner(request.resource.data);",
+    "      allow delete: if metaOwner(resource.data);",
+    "",
+    "      match /claims/{claimUid} {",
+    "        allow list: if false;",
+    "        allow get: if isMe(claimUid);",
+    "        allow create, update: if isMe(claimUid)",
+    "          && request.resource.data.uid == uidNow()",
+    "          && exists(/databases/$(database)/documents/triplog_meta/joins/$(code));",
+    "        allow delete: if isMe(claimUid) || aliasOwner(code);",
+    "      }",
+    "    }",
+    "",
+    "    // ---------- 로그인 계정 (본인만) ----------",
+    "    match /users/{userId} {",
+    "      allow list: if false;",
+    "      allow get, create, update, delete: if isMe(userId);",
+    "      match /trips/{code} {",
+    "        allow get, list, create, update, delete: if isMe(userId);",
+    "      }",
+    "    }",
+    "  }",
+    "}"
+  ].join('\n');
 
   A['save-nick'] = function () {
     var v = UI.val('f_nick').trim();
@@ -2290,9 +2422,10 @@
     if (!cfg) return;
     var st = document.getElementById('fb-status');
     if (st) st.textContent = '확인 중…';
-    Store.testFirebase(cfg).then(function () {
-      if (st) st.textContent = '정상 ✅';
-      UI.toast('Firebase 연결 정상');
+    Store.testFirebase(cfg).then(function (r) {
+      var denied = !!(r && r.denied);
+      if (st) st.textContent = denied ? '정상 ✅ (로그인 필요)' : '정상 ✅';
+      UI.toast(denied ? 'Firebase 연결 정상 · 규칙이 비로그인 접근을 막고 있어요' : 'Firebase 연결 정상');
     }).catch(function (e) {
       if (st) st.textContent = '실패: ' + (e.code || e.message || e);
       UI.toast('연결 실패 — 규칙/DB 생성을 확인해 주세요');

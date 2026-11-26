@@ -286,6 +286,7 @@
     if (code === 'login') { UI.requireLogin(); return; }
     if (code === 'owner') { UI.toast('방장만 일행을 추가·수정·삭제할 수 있어요', 2800); return; }
     if (code === 'notmember') { UI.toast('이 여행의 일행이 아니에요 · 초대 링크로 다시 참여해 주세요', 3200); return; }
+    if (code === 'denied') { UI.toast(Store.DENIED_MESSAGE || '이 여행을 볼 권한이 없어요', 4200); return; }
   };
 
   /* ------------------------------------------------------------ account */

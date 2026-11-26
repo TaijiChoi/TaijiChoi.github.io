@@ -1394,6 +1394,54 @@
     };
   }
   Core.whoOf = whoOf;
+  /* ------------------------------------------- v32: 저장소 접근 명단
+     방 문서(trips/{code})에 함께 실어 보내는 명단. Firestore 규칙이 이 값만 보고 읽기·쓰기를 허용한다.
+     · memberUids    — 방장 + 계정(uid)이 연결된 일행. 규칙: request.auth.uid in memberUids
+     · pendingEmails — 아직 계정이 연결되지 않았지만 방장이 이메일을 적어 둔 일행 (그 이메일로 로그인하면 들어올 수 있다)
+     값은 짧고 중복 없이 만든다 (규칙은 배열을 그대로 본다). */
+  Core.MAX_MEMBER_UIDS = 100;
+  Core.memberUidsOf = function (trip) {
+    var out = [], seen = {};
+    function push(v) {
+      var s = String(v == null ? '' : v).trim();
+      if (!s || seen[s] || out.length >= Core.MAX_MEMBER_UIDS) return;
+      seen[s] = 1;
+      out.push(s);
+    }
+    if (!trip) return out;
+    push(trip.ownerUid);
+    var ms = trip.members || [];
+    for (var i = 0; i < ms.length; i++) if (ms[i] && ms[i].uid) push(ms[i].uid);
+    // 다른 기기·참여자가 남긴 허용 목록은 지우지 않는다 (막 합류한 일행의 uid가 사라지지 않게)
+    var kept = Array.isArray(trip.memberUids) ? trip.memberUids : [];
+    for (var j = 0; j < kept.length; j++) push(kept[j]);
+    return out;
+  };
+  /** 방장이 이메일만 적어 둔 일행 (계정 미연결). 규칙의 pendingEmails와 같은 값 */
+  Core.pendingEmailsOf = function (trip) {
+    var out = [], seen = {};
+    var ms = (trip && trip.members) || [];
+    for (var i = 0; i < ms.length; i++) {
+      var m = ms[i];
+      if (!m || m.uid) continue;                 // 이미 계정이 연결된 일행은 명단(memberUids)으로 들어간다
+      var mail = String(m.email == null ? '' : m.email).trim().toLowerCase();
+      if (!mail || seen[mail]) continue;
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) continue;
+      seen[mail] = 1;
+      out.push(mail);
+      if (out.length >= Core.MAX_MEMBER_UIDS) break;
+    }
+    return out;
+  };
+  /** v32: 규칙과 같은 기준으로 이 방의 방장이거나 일행 명단(memberUids)에 있는가 — 실제 저장소 접근 권한 */
+  Core.isRuleMember = function (trip, user) {
+    var me = whoOf(user);
+    if (!me.uid || !trip) return false;
+    if (trip.ownerUid && String(trip.ownerUid) === me.uid) return true;
+    var ids = Array.isArray(trip.memberUids) ? trip.memberUids : [];
+    for (var i = 0; i < ids.length; i++) if (String(ids[i]) === me.uid) return true;
+    return false;
+  };
   /**
    * 이 방 문서(meta)의 방장·일행에 내 계정이 들어 있는가 (v28)
    *  · 초대 코드를 새로 발급해도 **이미 함께 쓰는 사람**은 예전 코드로도 계속 들어올 수 있게 하는 기준

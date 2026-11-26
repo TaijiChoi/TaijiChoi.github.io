@@ -87,6 +87,7 @@
     if (trip.remoteCode) {
       Store.openRemote(trip.id).catch(function (e) {
         if (e && e.code === 'notfound') { goneHome(trip.id); return; }
+        if (e && e.code === 'denied') { UI.toast(Store.DENIED_MESSAGE, 4200); return; }
         UI.toast('실시간 연결 실패: ' + (e.message || e));
       });
     }
@@ -527,6 +528,13 @@
     UI.toast(Store.GONE_MESSAGE, 3600);
   }
 
+  /** v32: 규칙이 이 방의 접근을 막았다(일행이 아니거나 다른 계정) — 기기 데이터는 그대로 두고 화면만 돌린다 */
+  function deniedHome(tripId) {
+    if (App.view.screen === 'trip' && (!tripId || App.view.tripId === tripId)) App.goHome();
+    else render();
+    UI.toast(Store.DENIED_MESSAGE, 4600);
+  }
+
   function tryJoin(code, opts) {
     if (!Store.firebaseConfig()) {
       render();
@@ -551,13 +559,13 @@
         }, 500);
       }
     }).catch(function (e) {
-      if (e && (e.code === 'notfound' || e.code === 'revoked')) {
-        // 폭파된 방·재발급으로 닫힌 예전 코드: 참여시키지 않고 목록으로 튕겨낸다
+      if (e && (e.code === 'notfound' || e.code === 'revoked' || e.code === 'denied')) {
+        // 폭파된 방·재발급으로 닫힌 예전 코드·권한 없는 계정: 참여시키지 않고 목록으로 튕겨낸다
         pendingCode = '';
         cleanUrl();
         UI.close();
         App.goHome();
-        UI.toast(e.code === 'revoked' ? Store.REVOKED_MESSAGE : Store.GONE_MESSAGE, 4200);
+        UI.toast(e.code === 'notfound' ? Store.GONE_MESSAGE : Store.REVOKED_MESSAGE, 4200);
         return;
       }
       var needLogin = e && e.code === 'need-login';
@@ -597,6 +605,7 @@
 
     Store.onChange(function (info) {
       if (info && info.gone) { goneHome(info.tripId); return; }
+      if (info && info.denied) { deniedHome(info.tripId); return; }
       if (info && info.error) return; // 오류는 render에서 토스트
       render();
     });
@@ -626,6 +635,7 @@
       if (t && t.remoteCode) {
         Store.openRemote(t.id).catch(function (e) {
           if (e && e.code === 'notfound') goneHome(t.id);
+          else if (e && e.code === 'denied') UI.toast(Store.DENIED_MESSAGE, 4200);
         });
       }
       autoRates(t);
