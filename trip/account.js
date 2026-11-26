@@ -206,6 +206,8 @@
       if (!meta || !meta.fromCache) docsFromServer = true;
       markDocsReady();
       notify();
+      // v30: 첫 목록 뒤에 실시간으로 목록이 바뀌면(다른 기기에서 추가·삭제) 새로고침 없이 바로 맞춘다
+      if (Account.signedIn() && !syncing) Account.syncSoon(80);
     }, function (e) {
       error = tlErr(e);
       notify();
@@ -341,11 +343,14 @@
       });
     }
 
-    /** 기기에만 있는 여행(오프라인 생성 포함)과 올리지 못한 여행을 DB로 올린다 */
+    /** 기기에만 있는 여행(오프라인 생성 포함)과 올리지 못한 여행을 DB로 올린다
+        v30: 이미 초대코드가 있는 원격 여행은 syncPending(오프라인 생성·업로드 실패)일 때만 올린다.
+        첫 회차(stage.firstRun)라도 옛 원격 여행을 다시 올리지 않는다 — 다른 기기에서 지운 여행이
+        이 기기의 첫 실행 때문에 DB 목록에 되살아나면 두 기기가 다시 달라진다. */
     function uploadAll() {
       var list = locals().filter(function (t) {
-        if (!codeOfTrip(t) || t.syncPending) return true;
-        return stage.firstRun && t.createdHere;   // 이 기기에서 만든 옛 여행은 첫 회차에 한 번 올린다
+        if (!codeOfTrip(t)) return true;    // 이 기기에만 있는(초대코드 없는) 여행
+        return !!t.syncPending;             // 오프라인에서 만들었거나 올리지 못한 여행
       });
       var chain = Promise.resolve();
       list.forEach(function (t) { chain = chain.then(function () { return uploadOne(t); }); });
@@ -355,7 +360,7 @@
     /** DB 목록에 없는 기기 여행은 지운다 — 다른 기기에서 지운 여행은 여기서 사라진다 */
     function pruneLocal() {
       if (!docsReady || !docsFromServer) return 0;              // 목록을 못 받았으면(오프라인·캐시) 지우지 않는다
-      if (!Object.keys(stage.have).length) return 0;            // 목록이 비어 있으면 일시 오류로 보고 그대로 둔다
+      // v30: 서버가 확인해 준 목록이면 0건도 그대로 따른다 (마지막 여행까지 지운 계정은 기기에서도 모두 지운다)
       var liveId = '';
       try { liveId = TL.Store.connectedTripId ? TL.Store.connectedTripId() : ''; } catch (e) {}
       var nowMs = Date.now();
@@ -366,7 +371,6 @@
         if (t.syncPending || stage.uploaded[c] || stage.have[c]) return;   // 올리기 대기·이번에 올린 것·DB에 있는 것
         if (registered[uid + ':' + c]) return;                            // 방금 이 기기에서 올린 여행
         if (liveId && t.id === liveId) return;                            // 지금 열어 둔 여행
-        if (stage.firstRun && t.createdHere) return;                      // 첫 회차에 올린 옛 여행
         var made = Date.parse(t.createdAt || t.updatedAt || t.joinedAt || '');
         if (isFinite(made) && nowMs - made < 120000) return;              // 방금 만든·참여한 여행(서버 목록 지연)
         if (TL.Store.removeTripLocal(t.id)) n++;

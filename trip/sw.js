@@ -3,8 +3,8 @@
    · index.html의 ?v= 값과 아래 VERSION을 함께 올린다 (deploy 전 확인: tests/run.py)
    · 같은 버전 안에서 앱 파일만 고쳐 다시 배포할 때는 아래 BUILD 주석을 바꿔 새 서비스워커를 받게 한다
      (스크립트가 바이트까지 같으면 브라우저가 갱신을 건너뛰고 예전 캐시를 계속 쓴다)
-   · BUILD: 29g — DB 기준 통합·오사카 샘플 제거·오프라인 저장 보장 */
-var VERSION = '29';
+   · BUILD: 30a — 첫 회차 재업로드 제거·빈 목록 정리·실시간 목록 동기화 */
+var VERSION = '30';
 var CACHE = 'triplog-v' + VERSION;
 var ASSETS = [
   './',
