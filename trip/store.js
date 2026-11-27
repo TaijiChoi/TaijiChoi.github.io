@@ -254,7 +254,12 @@
     var stamp = new Date().toISOString();
     return Promise.resolve().then(function () { return loadFb(); }).then(function (fsMod) {
       var roomRef = fsMod.doc(db, 'trips', room);
-      var payload = { inviteCode: next, inviteCodeAt: stamp, inviteCodeBy: (acct && acct.uid) || '' };
+      /* v32: 초대 코드를 바꾸기 전에 접근 명단(memberUids)을 확정해 둔다 —
+         명단이 비어 있으면 새 코드로 들어온 일행이 방을 열 수 없다 */
+      var payload = {
+        inviteCode: next, inviteCodeAt: stamp, inviteCodeBy: (acct && acct.uid) || '',
+        memberUids: Core.memberUidsOf(trip), pendingEmails: Core.pendingEmailsOf(trip)
+      };
       var write = (typeof fsMod.updateDoc === 'function')
         ? fsMod.updateDoc(roomRef, payload)                       // 방이 살아 있을 때만 (폭발한 방을 되살리지 않는다)
         : fsMod.setDoc(roomRef, payload, { merge: true });
@@ -1622,6 +1627,11 @@
             pushMeta(trip, ['ownerUid', 'ownerEmail']);
           } else if (m.ownerUid && !m.ownerEmail && trip.ownerEmail) {
             pushMeta(trip, ['ownerEmail']);
+          }
+          /* v32: 명단(memberUids)이 없는 예전 방은 일행이 열 때 접근 명단을 채워 둔다 —
+             이후 방장이 초대 코드를 바꿔도 일행 연결이 끊기지 않는다 */
+          if (!Array.isArray(m.memberUids) && Core.isRuleMember(trip, meNow)) {
+            pushMeta(trip, ['memberUids', 'pendingEmails']);
           }
           if (!linkedOnce) {
             linkedOnce = true;
