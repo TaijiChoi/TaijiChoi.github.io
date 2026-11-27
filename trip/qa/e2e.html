@@ -736,13 +736,10 @@
     try { cacheKeys = await caches.keys(); } catch (e) {}
     var coreSrc = q('script[src*="core.js"]') ? q('script[src*="core.js"]').getAttribute('src') : '';
     var VER = (coreSrc.match(/v=(\d+)/) || [])[1] || '0';
-    // 새로 설치한 SW가 캐시를 만드는 데 잠깐 걸린다 — 등록 직후 한 번만 보면 흔들린다 (활성화 + 최대 25초)
-    try { await Promise.race([window.navigator.serviceWorker.ready, sleep(25000)]); } catch (e) {}
-    for (var ck = 0; ck < 100 && cacheKeys.indexOf('triplog-v' + VER) < 0; ck++) {
-      await sleep(250);
-      try { cacheKeys = await caches.keys(); } catch (e) {}
-    }
-    ok(cacheKeys.indexOf('triplog-v' + VER) >= 0, '앱 셸 캐시 생성 (v' + VER + ')', cacheKeys.join(','));
+    /* 새로 설치한 SW가 캐시를 채우는 데는 앱이 지도·환율을 부르는 동안 수십 초 걸릴 수 있다.
+       캐시 이름 목록을 한 번에 보는 검사는 그 타이밍에 흔들리므로, 아래에서 core.js가 실제로
+       캐시에서 나오는지를 (재시도하며) 확인한다. */
+    ok(!!(reg && reg.active), '서비스 워커 활성화', reg && reg.active && reg.active.state);
     var shellHit = false;
     var cacheKey = new w.URL('./core.js?v=' + VER, w.location.href).href;
     var swDiag = '';
