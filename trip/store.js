@@ -168,7 +168,7 @@
 
   /* ---------------------------------------------- v28: 초대 코드 / 재발급
      방 문서 코드(trip.remoteCode)는 데이터 경로라 바뀌지 않고, 초대 코드(trip.inviteCode)만 새로 발급한다.
-     · 새 코드는 별칭 문서(triplog_meta/joins/<코드>)가 방 문서를 가리킨다 (v32)
+     · 새 코드는 별칭 문서(triplog_meta/<초대코드>)가 방 문서를 가리킨다 (v32)
        — 예전 별칭(triplog_meta/join-<코드>)도 함께 남겨 v31 이하 기기가 읽을 수 있게 한다
      · 방 문서의 inviteCode와 다른 코드(예전 코드)로는 새로 들어올 수 없다 — 이미 들어온 일행의 연결은 그대로
      · 이 기기에 이미 있는 방은 remoteCode로 계속 붙으므로, 초대 코드가 바뀌어도 끊기지 않는다 */
@@ -180,15 +180,12 @@
     return normalizeCode((trip && (trip.inviteCode || trip.remoteCode)) || '');
   };
   /* v32: 초대 코드 별칭 — 저장소 규칙이 문서 경로로 '지금 살아 있는 초대 코드'를 확인할 수 있게
-     코드를 그대로 문서 id로 쓰는 하위 컬렉션(triplog_meta/joins/<코드>)에 둔다 */
+     코드를 그대로 문서 id로 둔다 (triplog_meta/<초대코드>, 아래 claims/<uid>에 참여 표시) */
   function aliasRef(fsMod, code, legacy) {
     var c = normalizeCode(code);
-    return legacy ? fsMod.doc(db, 'triplog_meta', 'join-' + c) : fsMod.doc(db, 'triplog_meta', 'joins', c);
+    return legacy ? fsMod.doc(db, 'triplog_meta', 'join-' + c) : fsMod.doc(db, 'triplog_meta', c);
   }
   function joinAliasDocId(code) { return 'join-' + normalizeCode(code); }   // v31 이하 기기 호환 별칭
-  function claimRef(fsMod, invite, uid) {
-    return fsMod.doc(db, 'triplog_meta', 'joins', normalizeCode(invite), 'claims', String(uid));
-  }
   /** 초대 코드 → 방 문서 코드. 별칭 문서가 있으면 그 방, 없으면 같은 이름의 방 문서를 본다
       · 읽지 못했을 때(오프라인·권한)는 코드를 방 문서 코드로 보고 넘긴다 —
         연결 뒤 방 문서 스냅샷의 inviteCode로 다시 한 번 확인한다 */
@@ -1406,7 +1403,7 @@
   }
   Store.errCodeOf = errCodeOf;
 
-  function claimPath(invite, uid) { return ['triplog_meta', 'joins', normalizeCode(invite), 'claims', String(uid)]; }
+  function claimPath(invite, uid) { return ['triplog_meta', normalizeCode(invite), 'claims', String(uid)]; }
   /** 재발급된 초대 코드로 들어왔다는 표시를 남긴다 (규칙: 그 코드의 별칭 문서가 살아 있어야 만든다) */
   function leaveClaim(fsMod, invite, uid) {
     var code = normalizeCode(invite);
