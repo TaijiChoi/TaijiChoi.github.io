@@ -3,7 +3,7 @@
    · index.html의 ?v= 값과 아래 VERSION을 함께 올린다 (deploy 전 확인: tests/run.py)
    · 같은 버전 안에서 앱 파일만 고쳐 다시 배포할 때는 아래 BUILD 주석을 바꿔 새 서비스워커를 받게 한다
      (스크립트가 바이트까지 같으면 브라우저가 갱신을 건너뛰고 예전 캐시를 계속 쓴다)
-   · BUILD: 32a — 저장소 완전 차단: 비로그인·목록 조회 금지, 방장·일행(memberUids)만 접근 */
+   · BUILD: 32b — 규칙 별칭 경로(triplog_meta/<초대코드>) 수정 */
 var VERSION = '32';
 var CACHE = 'triplog-v' + VERSION;
 var ASSETS = [
