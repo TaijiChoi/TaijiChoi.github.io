@@ -736,8 +736,9 @@
     try { cacheKeys = await caches.keys(); } catch (e) {}
     var coreSrc = q('script[src*="core.js"]') ? q('script[src*="core.js"]').getAttribute('src') : '';
     var VER = (coreSrc.match(/v=(\d+)/) || [])[1] || '0';
-    // 새로 설치한 SW가 캐시를 만드는 데 잠깐 걸린다 — 등록 직후 한 번만 보면 흔들린다 (최대 10초)
-    for (var ck = 0; ck < 40 && cacheKeys.indexOf('triplog-v' + VER) < 0; ck++) {
+    // 새로 설치한 SW가 캐시를 만드는 데 잠깐 걸린다 — 등록 직후 한 번만 보면 흔들린다 (활성화 + 최대 25초)
+    try { await Promise.race([window.navigator.serviceWorker.ready, sleep(25000)]); } catch (e) {}
+    for (var ck = 0; ck < 100 && cacheKeys.indexOf('triplog-v' + VER) < 0; ck++) {
       await sleep(250);
       try { cacheKeys = await caches.keys(); } catch (e) {}
     }
